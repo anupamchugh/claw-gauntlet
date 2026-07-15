@@ -338,6 +338,8 @@ CassMemoryAdapter retrieves relevant prior decisions and reasoning for an agent.
 
 CredentialArbiter evaluates a narrow request containing the actor, host, action, scope, and approval record. It returns a short-lived capability or denial. The calling agent never receives the underlying credential.
 
+Secret storage is a provider adapter rather than a requirement of the protocol. A Vault adapter may exchange an approved user or workload identity for a short-lived dynamic database/API credential and inject it only into the isolated MCP tool or publisher process. Agent Mail carries the approval, correlation, and receipt IDs but never the token or secret. HashiCorp Vault's native Agent Registry and OAuth resource-server support can add enterprise agent identity and authorization ceilings, but those features are optional and currently beta/Enterprise; the open-source Claw foundation must also work with a local keychain or another secret manager.
+
 ### Scheduling and Heartbeats
 
 Schedulers create bounded wake-ups with a reason, deadline, budget, and Bead. Heartbeats report health and freshness. A heartbeat cannot grant new permissions or turn a draft into a publication.
