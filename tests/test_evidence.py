@@ -139,7 +139,7 @@ def test_failed_atomic_replace_removes_the_temporary_file(tmp_path, monkeypatch)
     ]
 
 
-def test_directory_fsync_failure_preserves_preexisting_valid_artifact(
+def test_directory_fsync_failure_preserves_committed_valid_artifact(
     tmp_path, monkeypatch
 ):
     root = tmp_path / "evidence"
@@ -147,6 +147,7 @@ def test_directory_fsync_failure_preserves_preexisting_valid_artifact(
     content = b"stable"
     reference = store.put_bytes(content)
     target = _artifact_target(root, reference)
+    target.write_bytes(b"corrupt")
     real_fsync = evidence_module.os.fsync
 
     def fail_directory_fsync(descriptor):
@@ -163,6 +164,71 @@ def test_directory_fsync_failure_preserves_preexisting_valid_artifact(
     assert store.verify(reference)
 
 
+def test_repeated_put_keeps_valid_artifact_without_reaching_post_replace_check(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    content = b"preexisting valid evidence"
+    reference = store.put_bytes(content)
+    target = _artifact_target(root, reference)
+    original_identity = (target.stat().st_dev, target.stat().st_ino)
+    real_assert_directory_chain = store._assert_directory_chain
+    checks = 0
+
+    def fail_second_directory_check(*args):
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise OSError("post-replace revalidation unavailable")
+        real_assert_directory_chain(*args)
+
+    monkeypatch.setattr(
+        store,
+        "_assert_directory_chain",
+        fail_second_directory_check,
+    )
+
+    repeated = store.put_bytes(content)
+
+    assert repeated == reference
+    assert checks <= 1
+    assert (target.stat().st_dev, target.stat().st_ino) == original_identity
+    assert store.verify(reference)
+
+
+def test_inconclusive_post_replace_check_preserves_new_valid_artifact(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    content = b"new valid evidence"
+    digest = sha256(content).hexdigest()
+    reference = EvidenceRef(algorithm="sha256", digest=digest)
+    target = _artifact_target(root, reference)
+    real_assert_directory_chain = store._assert_directory_chain
+    checks = 0
+
+    def fail_second_directory_check(*args):
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise OSError("post-replace revalidation unavailable")
+        real_assert_directory_chain(*args)
+
+    monkeypatch.setattr(
+        store,
+        "_assert_directory_chain",
+        fail_second_directory_check,
+    )
+
+    with pytest.raises(OSError, match="revalidation unavailable"):
+        store.put_bytes(content)
+
+    assert target.read_bytes() == content
+    assert store.verify(reference)
+
+
 def test_failing_writer_does_not_delete_concurrent_same_digest_replacement(
     tmp_path, monkeypatch
 ):
@@ -171,6 +237,7 @@ def test_failing_writer_does_not_delete_concurrent_same_digest_replacement(
     content = b"same digest"
     reference = store.put_bytes(content)
     target = _artifact_target(root, reference)
+    target.write_bytes(b"corrupt")
     real_fsync = evidence_module.os.fsync
     real_replace = evidence_module.os.replace
     concurrent_identity = None

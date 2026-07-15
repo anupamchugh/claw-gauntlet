@@ -29,6 +29,10 @@ class EvidenceIntegrityError(OSError):
     """Raised when stored evidence does not match its content hash."""
 
 
+class _EvidenceContainmentChangedError(ValueError):
+    """Raised when descriptor checks prove the configured path changed."""
+
+
 @dataclass(frozen=True)
 class EvidenceRef:
     algorithm: str
@@ -99,6 +103,15 @@ class EvidenceStore:
         directory_fd: int,
     ) -> None:
         digest = reference.digest
+        if self._existing_artifact_matches(directory_fd, digest):
+            self._assert_directory_chain(
+                reference,
+                root_fd,
+                algorithm_fd,
+                directory_fd,
+            )
+            return
+
         descriptor, temporary_name = self._create_temporary_file(
             directory_fd,
             digest,
@@ -142,7 +155,7 @@ class EvidenceStore:
                 algorithm_fd,
                 directory_fd,
             )
-        except BaseException:
+        except _EvidenceContainmentChangedError:
             self._cleanup_installed_inode(
                 directory_fd,
                 digest,
@@ -303,7 +316,9 @@ class EvidenceStore:
         expected = os.fstat(expected_fd)
         actual = os.fstat(actual_fd)
         if (expected.st_dev, expected.st_ino) != (actual.st_dev, actual.st_ino):
-            raise ValueError("evidence directory containment changed during operation")
+            raise _EvidenceContainmentChangedError(
+                "evidence directory containment changed during operation"
+            )
 
     @staticmethod
     def _validate_trusted_directory(descriptor: int) -> None:
@@ -343,6 +358,32 @@ class EvidenceStore:
             return
         os.unlink(name, dir_fd=directory_fd)
         os.fsync(directory_fd)
+
+    @staticmethod
+    def _existing_artifact_matches(directory_fd: int, digest: str) -> bool:
+        try:
+            descriptor = os.open(
+                digest,
+                _READ_FLAGS,
+                dir_fd=directory_fd,
+            )
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            if error.errno in _SYMLINK_ERRORS:
+                return False
+            raise EvidenceIntegrityError(
+                "existing evidence artifact could not be inspected safely"
+            ) from error
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                return False
+            with os.fdopen(descriptor, "rb", closefd=False) as artifact:
+                actual_digest = sha256(artifact.read()).hexdigest()
+        finally:
+            os.close(descriptor)
+        return actual_digest == digest
 
     @contextmanager
     def _digest_lock(self, directory_fd: int, digest: str):
@@ -389,7 +430,9 @@ class EvidenceStore:
     @staticmethod
     def _raise_for_unsafe_path(error: OSError) -> None:
         if error.errno in _SYMLINK_ERRORS:
-            raise ValueError("evidence path resolves outside evidence root") from error
+            raise _EvidenceContainmentChangedError(
+                "evidence path resolves outside evidence root"
+            ) from error
 
     @staticmethod
     def _validated_reference(reference: EvidenceRef) -> EvidenceRef:
