@@ -32,7 +32,8 @@ body:
     id: provenance
     attributes:
       label: Public source and provenance
-      description: Link a canonical public specification or minimal license-compatible fixture.
+      description: Link a canonical public specification or minimal license-compatible fixture. For internal changes with no external source, write "Not applicable" and explain why.
+      placeholder: Canonical source URL, fixture details, or "Not applicable — this only changes ..."
     validations:
       required: true
   - type: textarea

@@ -19,10 +19,10 @@ exception.
 Use Python 3.12 and `uv`:
 
 ```bash
-uv sync
+uv sync --locked
 uv run pytest -q
 uv run python -m compileall -q src tests
-git diff --check
+git diff --check "$(git merge-base origin/main HEAD)"...HEAD
 ```
 
 Add tests before or with behavior changes. Public interfaces need success,

@@ -14,9 +14,10 @@ trusting a confident summary.
 
 - A semantically versioned catalog of immutable capability manifests.
 - Versioned, validated handoff envelopes and run records.
-- A local content-addressed evidence store with canonical JSON, SHA-256
-  references, integrity verification, and path-hardening tests.
-- Read-only CLI commands for inspecting the catalog and individual manifests.
+- A POSIX-only local content-addressed evidence store with canonical JSON,
+  SHA-256 references, integrity verification, and path-hardening tests.
+- Portable read-only CLI commands for inspecting the catalog and individual
+  manifests on platforms supported by Python 3.12.
 
 Every catalog entry currently reports `planned`. The foundation types above are
 implemented and tested; the source-specific Claws and end-to-end workflows are
@@ -25,12 +26,15 @@ not yet implemented.
 ## Quick start
 
 Claw Gauntlet requires Python 3.12 and
-[`uv`](https://docs.astral.sh/uv/getting-started/installation/).
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/). The catalog CLI
+is portable across supported Python platforms. `EvidenceStore` and its tests
+currently require POSIX descriptor-relative, no-follow I/O, so use Linux or
+macOS for the full suite.
 
 ```bash
 git clone https://github.com/anupamchugh/claw-gauntlet.git
 cd claw-gauntlet
-uv sync
+uv sync --locked
 uv run pytest -q
 uv run clawgauntlet family --json
 uv run clawgauntlet manifest rrsclaw --json

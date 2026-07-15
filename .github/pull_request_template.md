@@ -16,7 +16,7 @@ Closes #
 
 - [ ] The change is review-sized and has a single coherent scope.
 - [ ] Tests cover success, validation, and relevant failure behavior.
-- [ ] `uv run pytest -q`, compile checks, and `git diff --check` pass.
+- [ ] `uv sync --locked`, tests, compile checks, and a base-to-HEAD `git diff --check` pass.
 - [ ] Fixtures are minimal, public, license-compatible, and carry provenance.
 - [ ] No secret, cookie, mailbox content, private repository data, personal export, or customer identifier is included.
 - [ ] Permissions are least-privileged and external actions require explicit human approval.
