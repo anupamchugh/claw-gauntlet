@@ -59,6 +59,7 @@ For example, engineering writing is a BlogClaw profile rather than EngineeringBl
 | Infrastructure | SandboxRunner | V1 | Execute untrusted checks without publisher credentials |
 | Discovery | ForkClaw | V2 | Map meaningful fork divergence and reusable patches |
 | Discovery | BirdClaw | V2 | Own X search, saved posts, and transport-neutral records |
+| Discovery | RedditClaw | V2 | Collect approved public community threads under Reddit's API and removal rules |
 | Discovery | PaperClaw | V2 | Collect papers, versions, citations, and code links |
 | Discovery | AppClaw | V2 | Collect public app listings, releases, and product signals |
 | Intelligence | VideoClaw | V2 | Analyze approved video metadata and timestamped evidence |
@@ -283,6 +284,10 @@ Maps repository forks, meaningful divergence, active maintainers, and reusable p
 
 BirdClaw owns X transport and saved-post collection. TwitterClaw remains the higher-level research and publishing workflow. This split allows the transport to change without breaking publication policy.
 
+### RedditClaw
+
+RedditClaw is a distinct community connector because Reddit's authentication, rate limits, user-content license, removal requirements, and community norms differ from ordinary feeds. It uses only an approved official API surface, records post/comment IDs and bounded display evidence, honors removal or termination requirements, and never uses collected content for model training. Commercial or higher-volume use remains disabled until the required Reddit agreement exists. The Claw never votes, comments, messages users, or manufactures engagement; an approved human-authored response is a separate publication action.
+
 ### PaperClaw
 
 PaperClaw tracks public papers, revisions, citations, implementation repositories, and reproducibility evidence. It stores abstracts and metadata by default, not copyrighted full text.
@@ -306,6 +311,8 @@ SkillClaw inventories agent skills, validates instructions and dependencies, det
 ### AssetClaw
 
 AssetClaw owns visual assets used by releases, documentation, blogs, and approved social bundles. It exposes provider-neutral generate, edit, upscale, analyze, and source operations. Provider adapters may target OpenAI image generation, Adobe Firefly, Stability AI, local or cloud ComfyUI workflows, or a separately installed Unicom MediaClaw deployment. A poster, social card, thumbnail, diagram, or blog hero is an AssetClaw workflow rather than another Claw.
+
+Pinterest is an AssetClaw provider adapter, not a PinterestClaw. Its official API requires an authenticated account and explicit board or Pin scopes, so the adapter is disabled by default and operates only on the approving user's boards. It may create or save an approved release asset and retrieve permitted board metadata; it does not scrape inspiration boards, bulk-copy images, or infer reuse rights from the existence of a Pin.
 
 Every result records the brief hash, source or prompt evidence reference, provider and model identifier, generation or request parameters, safety outcome, cost and latency observations, rights or license metadata, original artifact hash, derivative chain, and available content-provenance credentials. Credentials stay in CredentialArbiter, provider switching is never silent, and TrustClaw blocks unclear rights, private source material, impersonation risk, or missing provenance. RRSClaw evaluates provider availability, reproducibility, correction rate, safety failures, latency, and budget adherence. A human approves every externally published asset.
 
