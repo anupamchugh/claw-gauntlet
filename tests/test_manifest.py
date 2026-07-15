@@ -122,12 +122,21 @@ def test_manifest_from_dict_rejects_malformed_fields(field, value):
         CapabilityManifest.from_dict(payload)
 
 
-def test_family_contains_each_component_once_and_none_are_available():
+def test_family_contains_each_component_once_and_reports_real_status():
     manifests = family_manifests()
     names = [item.name for item in manifests]
     assert len(names) == len(set(names))
     assert {"RRSClaw", "DocsClaw", "BlogClaw", "TwitterClaw", "ForkClaw"} <= set(names)
-    assert {item.status for item in manifests} == {"planned"}
+    assert {item.status for item in manifests} == {"planned", "experimental"}
+    assert {
+        "StarClaw",
+        "GHClaw",
+        "ProjectClaw",
+        "RRSClaw",
+        "EvidenceStore",
+        "TaskLedgerAdapter",
+        "AgentMailTransport",
+    } == {item.name for item in manifests if item.status == "experimental"}
     assert {item.version for item in manifests} == {"0.1.0"}
     assert {item.protocol_version for item in manifests} == {"1.0.0"}
     assert manifest_for("RRSClaw").capabilities == ("run.score", "run.regression")

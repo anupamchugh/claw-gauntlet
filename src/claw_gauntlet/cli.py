@@ -1,14 +1,18 @@
 import argparse
+from hashlib import sha256
 import json
 from collections.abc import Sequence
 from pathlib import Path
 import sys
+from time import monotonic_ns
 from typing import Any
 
 from claw_gauntlet.adapters import JsonlMailTransport
-from claw_gauntlet.evidence import EvidenceStore
+from claw_gauntlet.evidence import EvidenceRef, EvidenceStore
 from claw_gauntlet.family import family_payload, manifest_for
+from claw_gauntlet.github_claws import GitHubAPIError, GitHubPublicCollector
 from claw_gauntlet.improvement import ImprovementCoordinator, ImprovementProposal
+from claw_gauntlet.project_claw import evaluate_repository
 from claw_gauntlet.rrs import score_run
 from claw_gauntlet.run_ledger import RunLedger, RunScore
 from claw_gauntlet.run_record import RunRecord
@@ -68,6 +72,23 @@ def _parser() -> argparse.ArgumentParser:
     _add_state_dir(consider)
     consider.add_argument("run_id")
     consider.add_argument("--threshold", type=int, default=85)
+
+    github = subparsers.add_parser("github")
+    github_commands = github.add_subparsers(dest="github_command", required=True)
+    github_repo = github_commands.add_parser("repo")
+    _add_state_dir(github_repo)
+    github_repo.add_argument("repository")
+    github_stars = github_commands.add_parser("stars")
+    _add_state_dir(github_stars)
+    github_stars.add_argument("username")
+    github_stars.add_argument("--max-pages", type=int, default=1)
+
+    project = subparsers.add_parser("project")
+    project_commands = project.add_subparsers(dest="project_command", required=True)
+    project_evaluate = project_commands.add_parser("evaluate")
+    _add_state_dir(project_evaluate)
+    project_evaluate.add_argument("--artifact-ref", required=True)
+    project_evaluate.add_argument("--input", type=Path, required=True)
     return parser
 
 
@@ -115,6 +136,51 @@ def _required_run(ledger: RunLedger, run_id: str) -> RunRecord:
     return record
 
 
+def _canonical_hash(payload: Any) -> str:
+    canonical = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"sha256:{sha256(canonical).hexdigest()}"
+
+
+def _record_success(
+    ledger: RunLedger,
+    *,
+    claw_name: str,
+    input_payload: Any,
+    artifact_refs: list[str],
+    duration_ms: int,
+) -> RunRecord:
+    record = RunRecord.create(
+        claw_name=claw_name,
+        claw_version="0.1.0",
+        input_hash=_canonical_hash(input_payload),
+        artifact_refs=artifact_refs,
+        outcome="success",
+        duration_ms=duration_ms,
+        retries=0,
+        approvals_required=0,
+        approvals_granted=0,
+        permission_violations=0,
+        human_corrections=0,
+    )
+    ledger.record_run(record)
+    score = score_run(record)
+    ledger.record_score(score)
+    return record
+
+
+def _evidence_ref(uri: str) -> EvidenceRef:
+    prefix = "evidence://sha256/"
+    if type(uri) is not str or not uri.startswith(prefix):
+        raise ValueError("artifact_ref must be an evidence SHA-256 reference")
+    return EvidenceRef(algorithm="sha256", digest=uri.removeprefix(prefix))
+
+
 def _foundation_command(args: argparse.Namespace) -> dict[str, Any]:
     state_root = _state_root(args.state_dir)
     if args.command == "evidence" and args.evidence_command == "put":
@@ -122,6 +188,75 @@ def _foundation_command(args: argparse.Namespace) -> dict[str, Any]:
             _read_json_object(args.input)
         )
         return {"artifact_ref": reference.uri, "status": "stored"}
+
+    evidence_store = EvidenceStore(state_root / "evidence")
+    if args.command == "github":
+        started_at = monotonic_ns()
+        collector = GitHubPublicCollector()
+        if args.github_command == "repo":
+            input_payload = {"repository": args.repository}
+            evidence = collector.repository(args.repository)
+            claw_name = "GHClaw"
+            summary = {"repository": evidence["full_name"]}
+        else:
+            input_payload = {
+                "max_pages": args.max_pages,
+                "username": args.username,
+            }
+            evidence = collector.starred(args.username, max_pages=args.max_pages)
+            claw_name = "StarClaw"
+            summary = {
+                "complete": evidence["complete"],
+                "repository_count": len(evidence["repositories"]),
+                "username": evidence["username"],
+            }
+        reference = evidence_store.put_json(evidence)
+        duration_ms = max(0, round((monotonic_ns() - started_at) / 1_000_000))
+        with RunLedger(state_root / "runs.duckdb") as ledger:
+            record = _record_success(
+                ledger,
+                claw_name=claw_name,
+                input_payload=input_payload,
+                artifact_refs=[reference.uri],
+                duration_ms=duration_ms,
+            )
+        return {
+            "artifact_ref": reference.uri,
+            "run": record.to_dict(),
+            "status": "collected",
+            "summary": summary,
+        }
+
+    if args.command == "project" and args.project_command == "evaluate":
+        started_at = monotonic_ns()
+        project_input = _read_json_object(args.input)
+        source_reference = _evidence_ref(args.artifact_ref)
+        source_evidence = evidence_store.get_json(source_reference)
+        evaluation = evaluate_repository(
+            source_evidence,
+            project_name=project_input["project_name"],
+            keywords=project_input["keywords"],
+            artifact_ref=source_reference.uri,
+        )
+        evaluation_reference = evidence_store.put_json(evaluation)
+        duration_ms = max(0, round((monotonic_ns() - started_at) / 1_000_000))
+        with RunLedger(state_root / "runs.duckdb") as ledger:
+            record = _record_success(
+                ledger,
+                claw_name="ProjectClaw",
+                input_payload={
+                    "project": project_input,
+                    "source_artifact_ref": source_reference.uri,
+                },
+                artifact_refs=[evaluation_reference.uri],
+                duration_ms=duration_ms,
+            )
+        return {
+            "artifact_ref": evaluation_reference.uri,
+            "evaluation": evaluation,
+            "run": record.to_dict(),
+            "status": "evaluated",
+        }
 
     ledger_path = state_root / "runs.duckdb"
     with RunLedger(ledger_path) as ledger:
@@ -180,7 +315,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     try:
         payload = _foundation_command(args)
-    except (OSError, ValueError, KeyError, TypeError, _FoundationCommandError) as error:
+    except (
+        GitHubAPIError,
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        _FoundationCommandError,
+    ) as error:
         print(
             json.dumps({"error": str(error), "status": "error"}, sort_keys=True),
             file=sys.stderr,

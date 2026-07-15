@@ -1,6 +1,7 @@
 import json
 from hashlib import sha256
 
+import claw_gauntlet.cli as cli_module
 from claw_gauntlet.cli import main
 
 
@@ -126,3 +127,77 @@ def test_foundation_command_returns_a_structured_error(tmp_path, capsys):
         "error": "run not found: missing-run",
         "status": "error",
     }
+
+
+def test_github_to_project_cli_slice_uses_immutable_evidence(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    repository_evidence = {
+        "schema": "claw.evidence.github-repository.v1",
+        "source_url": "https://api.github.com/repos/example/tool",
+        "observed_at": "2026-07-16T00:00:00Z",
+        "full_name": "example/tool",
+        "html_url": "https://github.com/example/tool",
+        "description": "Reliable agent workflow tooling",
+        "topics": ["agents", "workflow"],
+        "license_spdx": "MIT",
+        "language": "Python",
+        "archived": False,
+        "fork": False,
+        "stargazers_count": 42,
+        "forks_count": 3,
+        "open_issues_count": 2,
+        "pushed_at": "2026-07-15T12:00:00Z",
+        "default_branch": "main",
+    }
+
+    class FakeCollector:
+        def repository(self, repository):
+            assert repository == "example/tool"
+            return repository_evidence
+
+    monkeypatch.setattr(cli_module, "GitHubPublicCollector", FakeCollector)
+    state_dir = tmp_path / "state"
+    collected = _invoke(
+        [
+            "github",
+            "repo",
+            "--state-dir",
+            str(state_dir),
+            "example/tool",
+        ],
+        capsys,
+    )
+    assert collected["status"] == "collected"
+    assert collected["run"]["claw_name"] == "GHClaw"
+
+    project = tmp_path / "project.json"
+    project.write_text(
+        json.dumps(
+            {
+                "project_name": "Public Agent Workspace",
+                "keywords": ["agents", "swift"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluated = _invoke(
+        [
+            "project",
+            "evaluate",
+            "--state-dir",
+            str(state_dir),
+            "--artifact-ref",
+            collected["artifact_ref"],
+            "--input",
+            str(project),
+        ],
+        capsys,
+    )
+
+    assert evaluated["status"] == "evaluated"
+    assert evaluated["evaluation"]["decision"] == "candidate"
+    assert evaluated["evaluation"]["artifact_refs"] == [collected["artifact_ref"]]
+    assert evaluated["run"]["claw_name"] == "ProjectClaw"
