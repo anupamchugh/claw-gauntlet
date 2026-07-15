@@ -243,6 +243,12 @@ RSSClaw ingests RSS, Atom, and JSON Feed. It normalizes items, preserves canonic
 
 The initial public fixtures include the Atom feed at `https://blog.fsck.com/feed/feed.xml`. RSSClaw records the linked article as a source. It does not copy full copyrighted posts into the repository.
 
+RSSClaw also ships curated source packs. A source pack contains canonical public sites, topic tags, feed-discovery policy, provenance rules, and expected content types. It does not contain credentials or copied articles.
+
+The initial `engineering-blogs` pack includes the canonical public sites for Netflix Technology, Airbnb Engineering and Data Science, and Palantir's blog and architecture center. RSSClaw discovers advertised RSS, Atom, or JSON Feed endpoints from each canonical page, validates the returned media type and feed identity, and stores the verified endpoint with the observation timestamp. When a site publishes no feed, RSSClaw may use a sitemap as a read-only change source while reporting that the source is not a feed.
+
+Source-pack health is measured per source: discovery success, parse success, freshness, conditional-request support, duplicate rate, canonical-link stability, provenance completeness, retries, and human corrections. RRSClaw evaluates those measurements. A broken source opens an improvement Bead; it never silently disappears from a digest.
+
 ### DigestClaw
 
 Combines evidence into daily, weekly, release, and watchlist digests. Every claim links to its source artifact. DigestClaw can open Beads or send Agent Mail, but it cannot publish externally.
