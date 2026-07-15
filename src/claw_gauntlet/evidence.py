@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import stat
 from typing import Any
 
 
@@ -14,10 +15,12 @@ _SHA256_DIGEST = re.compile(r"^[0-9a-fA-F]{64}$")
 _O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 _DIRECTORY_FLAGS = os.O_RDONLY | _O_CLOEXEC | _O_DIRECTORY | _O_NOFOLLOW
-_READ_FLAGS = os.O_RDONLY | _O_CLOEXEC | _O_NOFOLLOW
+_READ_FLAGS = os.O_RDONLY | _O_CLOEXEC | _O_NOFOLLOW | _O_NONBLOCK
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_CLOEXEC | _O_NOFOLLOW
 _SYMLINK_ERRORS = {errno.ELOOP, errno.ENOTDIR}
+_REQUIRED_DIR_FD_FUNCTIONS = (os.open, os.mkdir, os.unlink, os.rename)
 
 
 class EvidenceIntegrityError(OSError):
@@ -42,36 +45,71 @@ class EvidenceRef:
 
 
 class EvidenceStore:
+    """POSIX evidence store rooted in caller-protected directories.
+
+    The configured root and its ancestors are a trust boundary: callers must
+    prevent same-identity processes from renaming them. Opened store directories
+    must be owned by the effective user and not group- or world-writable. Each
+    write also verifies directory identity before and after replacement so a
+    detected relocation is cleaned through the retained descriptor and fails.
+    """
+
     def __init__(self, root: str | os.PathLike[str]) -> None:
-        if not _O_DIRECTORY or not _O_NOFOLLOW or os.open not in os.supports_dir_fd:
-            raise RuntimeError("EvidenceStore requires no-follow descriptor-relative I/O")
+        dir_fd_support = all(
+            function in os.supports_dir_fd
+            for function in _REQUIRED_DIR_FD_FUNCTIONS
+        )
+        if (
+            os.name != "posix"
+            or not hasattr(os, "geteuid")
+            or not _O_DIRECTORY
+            or not _O_NOFOLLOW
+            or not _O_NONBLOCK
+            or not dir_fd_support
+        ):
+            raise RuntimeError(
+                "EvidenceStore requires POSIX no-follow descriptor-relative I/O"
+            )
         self.root = Path(root).resolve(strict=False)
 
     def put_bytes(self, content: bytes) -> EvidenceRef:
         digest = sha256(content).hexdigest()
         reference = EvidenceRef(algorithm="sha256", digest=digest)
-        with self._artifact_directory(reference, create=True) as directory_fd:
+        with self._artifact_directory(reference, create=True) as directory_chain:
+            root_fd, algorithm_fd, directory_fd = directory_chain
             descriptor, temporary_name = self._create_temporary_file(
                 directory_fd,
                 digest,
             )
+            replaced = False
             try:
                 with os.fdopen(descriptor, "wb") as temporary:
                     temporary.write(content)
                     temporary.flush()
                     os.fsync(temporary.fileno())
+                self._assert_directory_chain(
+                    reference,
+                    root_fd,
+                    algorithm_fd,
+                    directory_fd,
+                )
                 os.replace(
                     temporary_name,
                     digest,
                     src_dir_fd=directory_fd,
                     dst_dir_fd=directory_fd,
                 )
+                replaced = True
                 os.fsync(directory_fd)
+                self._assert_directory_chain(
+                    reference,
+                    root_fd,
+                    algorithm_fd,
+                    directory_fd,
+                )
             except BaseException:
-                try:
-                    os.unlink(temporary_name, dir_fd=directory_fd)
-                except FileNotFoundError:
-                    pass
+                cleanup_name = digest if replaced else temporary_name
+                self._cleanup_failed_put(directory_fd, cleanup_name)
                 raise
         return reference
 
@@ -87,17 +125,31 @@ class EvidenceStore:
 
     def get_bytes(self, reference: EvidenceRef) -> bytes:
         reference = self._validated_reference(reference)
-        with self._artifact_directory(reference, create=False) as directory_fd:
+        with self._artifact_directory(reference, create=False) as directory_chain:
+            _, _, directory_fd = directory_chain
             try:
                 descriptor = os.open(
                     reference.digest,
                     _READ_FLAGS,
                     dir_fd=directory_fd,
                 )
-            except OSError as error:
-                self._raise_for_unsafe_path(error)
+            except FileNotFoundError:
                 raise
-            with os.fdopen(descriptor, "rb") as evidence:
+            except OSError as error:
+                raise EvidenceIntegrityError(
+                    "evidence artifact must be a regular file with exactly one link"
+                ) from error
+            try:
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    raise EvidenceIntegrityError(
+                        "evidence artifact must be a regular file with exactly one link"
+                    )
+                evidence = os.fdopen(descriptor, "rb")
+            except BaseException:
+                os.close(descriptor)
+                raise
+            with evidence:
                 content = evidence.read()
         actual_digest = sha256(content).hexdigest()
         if actual_digest != reference.digest:
@@ -133,7 +185,7 @@ class EvidenceStore:
                 reference.digest[:2],
                 create=create,
             )
-            yield prefix_fd
+            yield root_fd, algorithm_fd, prefix_fd
         finally:
             if prefix_fd is not None:
                 os.close(prefix_fd)
@@ -145,24 +197,96 @@ class EvidenceStore:
         if create:
             self.root.mkdir(parents=True, exist_ok=True)
         try:
-            return os.open(self.root, _DIRECTORY_FLAGS)
+            descriptor = os.open(self.root, _DIRECTORY_FLAGS)
         except OSError as error:
             self._raise_for_unsafe_path(error)
             raise
+        try:
+            self._validate_trusted_directory(descriptor)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
 
     def _open_child_directory(self, parent_fd: int, name: str, *, create: bool) -> int:
         if create:
             try:
-                os.mkdir(name, mode=0o755, dir_fd=parent_fd)
+                os.mkdir(name, mode=0o700, dir_fd=parent_fd)
             except FileExistsError:
                 pass
             else:
                 os.fsync(parent_fd)
         try:
-            return os.open(name, _DIRECTORY_FLAGS, dir_fd=parent_fd)
+            descriptor = os.open(name, _DIRECTORY_FLAGS, dir_fd=parent_fd)
         except OSError as error:
             self._raise_for_unsafe_path(error)
             raise
+        try:
+            self._validate_trusted_directory(descriptor)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
+
+    def _assert_directory_chain(
+        self,
+        reference: EvidenceRef,
+        root_fd: int,
+        algorithm_fd: int,
+        prefix_fd: int,
+    ) -> None:
+        reopened_root = self._open_root(create=False)
+        try:
+            self._require_same_directory(root_fd, reopened_root)
+        finally:
+            os.close(reopened_root)
+
+        reopened_algorithm = self._open_child_directory(
+            root_fd,
+            reference.algorithm,
+            create=False,
+        )
+        try:
+            self._require_same_directory(algorithm_fd, reopened_algorithm)
+        finally:
+            os.close(reopened_algorithm)
+
+        reopened_prefix = self._open_child_directory(
+            algorithm_fd,
+            reference.digest[:2],
+            create=False,
+        )
+        try:
+            self._require_same_directory(prefix_fd, reopened_prefix)
+        finally:
+            os.close(reopened_prefix)
+
+    @staticmethod
+    def _require_same_directory(expected_fd: int, actual_fd: int) -> None:
+        expected = os.fstat(expected_fd)
+        actual = os.fstat(actual_fd)
+        if (expected.st_dev, expected.st_ino) != (actual.st_dev, actual.st_ino):
+            raise ValueError("evidence directory containment changed during operation")
+
+    @staticmethod
+    def _validate_trusted_directory(descriptor: int) -> None:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("evidence path component must be a directory")
+        if metadata.st_uid != os.geteuid():
+            raise PermissionError("evidence directories must be owned by the effective user")
+        if metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise PermissionError(
+                "evidence directories must not be group- or world-writable"
+            )
+
+    @staticmethod
+    def _cleanup_failed_put(directory_fd: int, name: str) -> None:
+        try:
+            os.unlink(name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            return
+        os.fsync(directory_fd)
 
     @staticmethod
     def _create_temporary_file(directory_fd: int, digest: str) -> tuple[int, str]:

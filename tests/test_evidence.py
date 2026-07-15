@@ -1,13 +1,36 @@
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from hashlib import sha256
 import os
 from pathlib import Path
+import signal
+import socket
 import stat
+import tempfile
+import time
 
 import pytest
 
 from claw_gauntlet import evidence as evidence_module
 from claw_gauntlet.evidence import EvidenceRef, EvidenceStore
+
+
+def _artifact_target(root, reference):
+    return root / "sha256" / reference.digest[:2] / reference.digest
+
+
+@contextmanager
+def _one_second_deadline():
+    def deadline_expired(signum, frame):
+        raise TimeoutError("evidence operation exceeded one second")
+
+    previous_handler = signal.signal(signal.SIGALRM, deadline_expired)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, 1.0)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 def test_put_is_content_addressed_idempotent_and_verified(tmp_path):
@@ -154,6 +177,49 @@ def test_directory_swap_to_symlink_cannot_redirect_write_outside_root(
     assert not [path for path in outside.rglob("*") if path.is_file()]
 
 
+def test_post_open_directory_relocation_is_cleaned_and_fails_closed(
+    tmp_path, monkeypatch
+):
+    content = b"late escaped write"
+    digest = sha256(content).hexdigest()
+    root = tmp_path / "evidence"
+    outside = tmp_path / "outside"
+    moved_algorithm_directory = outside / "moved-sha256"
+    outside.mkdir()
+    store = EvidenceStore(root)
+    real_replace = evidence_module.os.replace
+    relocated = False
+
+    def relocate_before_replace(source, destination, **kwargs):
+        nonlocal relocated
+        algorithm_directory = root / "sha256"
+        algorithm_directory.rename(moved_algorithm_directory)
+        algorithm_directory.symlink_to(
+            moved_algorithm_directory,
+            target_is_directory=True,
+        )
+        relocated = True
+        real_replace(source, destination, **kwargs)
+
+    monkeypatch.setattr(evidence_module.os, "replace", relocate_before_replace)
+
+    with pytest.raises(ValueError):
+        store.put_bytes(content)
+
+    assert relocated
+    assert not (moved_algorithm_directory / digest[:2] / digest).exists()
+
+
+def test_store_rejects_group_or_world_writable_root(tmp_path):
+    root = tmp_path / "evidence"
+    root.mkdir(mode=0o777)
+    root.chmod(0o777)
+    store = EvidenceStore(root)
+
+    with pytest.raises(PermissionError, match="writable"):
+        store.put_bytes(b"untrusted root")
+
+
 def test_corruption_fails_verification_and_verified_read(tmp_path):
     store = EvidenceStore(tmp_path / "evidence")
     reference = store.put_bytes(b"trusted")
@@ -196,6 +262,90 @@ def test_valid_missing_reference_raises_file_not_found(tmp_path):
     with pytest.raises(FileNotFoundError):
         store.get_bytes(missing)
     assert store.verify(missing) is False
+
+
+def test_directory_leaf_fails_integrity_without_unrelated_error(tmp_path):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    reference = EvidenceRef(algorithm="sha256", digest="1" * 64)
+    target = _artifact_target(root, reference)
+    target.mkdir(parents=True)
+
+    with _one_second_deadline():
+        assert store.verify(reference) is False
+    with pytest.raises(evidence_module.EvidenceIntegrityError, match="regular file"):
+        store.get_bytes(reference)
+
+
+def test_fifo_leaf_fails_integrity_without_blocking(tmp_path):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    reference = EvidenceRef(algorithm="sha256", digest="2" * 64)
+    target = _artifact_target(root, reference)
+    target.parent.mkdir(parents=True)
+    os.mkfifo(target)
+
+    started = time.monotonic()
+    with _one_second_deadline():
+        assert store.verify(reference) is False
+    assert time.monotonic() - started < 0.5
+    with _one_second_deadline():
+        with pytest.raises(evidence_module.EvidenceIntegrityError, match="regular file"):
+            store.get_bytes(reference)
+
+
+def test_unix_socket_leaf_fails_integrity_without_unrelated_error():
+    with tempfile.TemporaryDirectory(prefix="cg-", dir="/tmp") as directory:
+        root = Path(directory) / "evidence"
+        store = EvidenceStore(root)
+        reference = EvidenceRef(algorithm="sha256", digest="3" * 64)
+        target = _artifact_target(root, reference)
+        target.parent.mkdir(parents=True)
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(str(target))
+        try:
+            with _one_second_deadline():
+                assert store.verify(reference) is False
+            with pytest.raises(
+                evidence_module.EvidenceIntegrityError,
+                match="regular file",
+            ):
+                store.get_bytes(reference)
+        finally:
+            server.close()
+
+
+def test_leaf_symlink_fails_integrity_without_following_target(tmp_path):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    reference = EvidenceRef(algorithm="sha256", digest="4" * 64)
+    target = _artifact_target(root, reference)
+    target.parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"outside")
+    target.symlink_to(outside)
+
+    with _one_second_deadline():
+        assert store.verify(reference) is False
+    with pytest.raises(evidence_module.EvidenceIntegrityError, match="regular file"):
+        store.get_bytes(reference)
+
+
+def test_multi_link_leaf_fails_integrity(tmp_path):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    content = b"linked content"
+    reference = EvidenceRef(algorithm="sha256", digest=sha256(content).hexdigest())
+    target = _artifact_target(root, reference)
+    target.parent.mkdir(parents=True)
+    outside = tmp_path / "outside-link"
+    outside.write_bytes(content)
+    os.link(outside, target)
+
+    with _one_second_deadline():
+        assert store.verify(reference) is False
+    with pytest.raises(evidence_module.EvidenceIntegrityError, match="one link"):
+        store.get_bytes(reference)
 
 
 def test_evidence_ref_is_immutable_and_normalizes_sha256_hex_to_lowercase():
