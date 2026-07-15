@@ -1,6 +1,8 @@
 from dataclasses import FrozenInstanceError
 from hashlib import sha256
+import os
 from pathlib import Path
+import stat
 
 import pytest
 
@@ -29,6 +31,21 @@ def test_put_json_uses_compact_sorted_utf8_canonical_bytes(tmp_path):
     assert store.get_bytes(reference) == canonical
 
 
+@pytest.mark.parametrize(
+    "value",
+    [float("nan"), float("inf"), float("-inf")],
+    ids=["nan", "positive-infinity", "negative-infinity"],
+)
+def test_put_json_rejects_nonfinite_floats_without_artifacts(tmp_path, value):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+
+    with pytest.raises(ValueError, match="JSON compliant"):
+        store.put_json({"value": value})
+
+    assert not [path for path in root.rglob("*") if path.is_file()]
+
+
 def test_put_bytes_replaces_from_a_temporary_file_in_the_target_directory(
     tmp_path, monkeypatch
 ):
@@ -36,13 +53,13 @@ def test_put_bytes_replaces_from_a_temporary_file_in_the_target_directory(
     replacements = []
     real_replace = evidence_module.os.replace
 
-    def record_replace(source, destination):
+    def record_replace(source, destination, **kwargs):
         source_path = Path(source)
         destination_path = Path(destination)
-        assert source_path.parent == destination_path.parent
-        assert source_path.is_file()
-        replacements.append((source_path, destination_path))
-        real_replace(source, destination)
+        assert kwargs["src_dir_fd"] == kwargs["dst_dir_fd"]
+        assert os.stat(source, dir_fd=kwargs["src_dir_fd"])
+        replacements.append((source_path, destination_path, kwargs))
+        real_replace(source, destination, **kwargs)
 
     monkeypatch.setattr(evidence_module.os, "replace", record_replace)
 
@@ -56,15 +73,32 @@ def test_put_bytes_replaces_from_a_temporary_file_in_the_target_directory(
         / reference.digest
     )
     assert len(replacements) == 1
-    assert replacements[0][1] == expected
+    assert replacements[0][1] == Path(reference.digest)
     assert expected.read_bytes() == b"atomic evidence"
     assert list(expected.parent.iterdir()) == [expected]
+
+
+def test_put_bytes_fsyncs_artifact_and_parent_directory(tmp_path, monkeypatch):
+    store = EvidenceStore(tmp_path / "evidence")
+    fsynced_types = []
+    real_fsync = evidence_module.os.fsync
+
+    def record_fsync(descriptor):
+        fsynced_types.append(stat.S_IFMT(os.fstat(descriptor).st_mode))
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(evidence_module.os, "fsync", record_fsync)
+
+    store.put_bytes(b"durable evidence")
+
+    assert stat.S_IFREG in fsynced_types
+    assert stat.S_IFDIR in fsynced_types
 
 
 def test_failed_atomic_replace_removes_the_temporary_file(tmp_path, monkeypatch):
     store = EvidenceStore(tmp_path / "evidence")
 
-    def fail_replace(source, destination):
+    def fail_replace(source, destination, **kwargs):
         raise OSError("replace failed")
 
     monkeypatch.setattr(evidence_module.os, "replace", fail_replace)
@@ -75,6 +109,49 @@ def test_failed_atomic_replace_removes_the_temporary_file(tmp_path, monkeypatch)
     assert not [
         path for path in (tmp_path / "evidence").rglob("*") if path.is_file()
     ]
+
+
+def test_directory_swap_to_symlink_cannot_redirect_write_outside_root(
+    tmp_path, monkeypatch
+):
+    content = b"escaped write"
+    digest = sha256(content).hexdigest()
+    root = tmp_path / "evidence"
+    algorithm_directory = root / "sha256"
+    displaced_directory = root / "sha256-before-swap"
+    outside = tmp_path / "outside"
+    algorithm_directory.mkdir(parents=True)
+    (outside / digest[:2]).mkdir(parents=True)
+    store = EvidenceStore(root)
+    real_open = evidence_module.os.open
+    swapped = False
+
+    def swap_before_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        path_value = os.fspath(path)
+        opening_algorithm_relative_to_root = (
+            dir_fd is not None and path_value == "sha256"
+        )
+        opening_old_temporary_path = (
+            dir_fd is None
+            and path_value.startswith(str(algorithm_directory / digest[:2]))
+            and path_value.endswith(".tmp")
+        )
+        if not swapped and (
+            opening_algorithm_relative_to_root or opening_old_temporary_path
+        ):
+            algorithm_directory.rename(displaced_directory)
+            algorithm_directory.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(evidence_module.os, "open", swap_before_open)
+
+    with pytest.raises(ValueError, match="outside evidence root"):
+        store.put_bytes(content)
+
+    assert swapped
+    assert not [path for path in outside.rglob("*") if path.is_file()]
 
 
 def test_corruption_fails_verification_and_verified_read(tmp_path):
