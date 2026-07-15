@@ -201,3 +201,68 @@ def test_github_to_project_cli_slice_uses_immutable_evidence(
     assert evaluated["evaluation"]["decision"] == "candidate"
     assert evaluated["evaluation"]["artifact_refs"] == [collected["artifact_ref"]]
     assert evaluated["run"]["claw_name"] == "ProjectClaw"
+
+
+def test_publication_bundle_cli_creates_an_approval_gated_publisher_request(
+    tmp_path,
+    capsys,
+):
+    state_dir = tmp_path / "state"
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps({"claim": "Public evidence"}), encoding="utf-8")
+    stored = _invoke(
+        [
+            "evidence",
+            "put",
+            "--state-dir",
+            str(state_dir),
+            "--input",
+            str(source),
+        ],
+        capsys,
+    )
+    publication_input = tmp_path / "publication.json"
+    publication_input.write_text(
+        json.dumps(
+            {
+                "title": "Claw Gauntlet release",
+                "content": ["Evidence first. Publishing only after approval."],
+                "artifact_refs": [stored["artifact_ref"]],
+                "source_urls": ["https://github.com/example/tool"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundled = _invoke(
+        [
+            "publication",
+            "bundle",
+            "--channel",
+            "twitter",
+            "--state-dir",
+            str(state_dir),
+            "--input",
+            str(publication_input),
+        ],
+        capsys,
+    )
+    assert bundled["run"]["claw_name"] == "TwitterClaw"
+    assert bundled["bundle"]["approval_required"] is True
+
+    requested = _invoke(
+        [
+            "publication",
+            "request",
+            "--state-dir",
+            str(state_dir),
+            bundled["artifact_ref"],
+        ],
+        capsys,
+    )
+    assert requested["status"] == "approval-requested"
+    outbox = state_dir / "mail" / "publisher-requests.jsonl"
+    handoff = json.loads(outbox.read_text().strip())
+    assert handoff["approval_required"] is True
+    assert handoff["artifact_refs"] == [bundled["artifact_ref"]]
+    assert "Evidence first" not in outbox.read_text()

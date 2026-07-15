@@ -133,6 +133,8 @@ def test_family_contains_each_component_once_and_reports_real_status():
         "GHClaw",
         "ProjectClaw",
         "RRSClaw",
+        "BlogClaw",
+        "TwitterClaw",
         "EvidenceStore",
         "TaskLedgerAdapter",
         "AgentMailTransport",

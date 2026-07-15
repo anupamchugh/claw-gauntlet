@@ -13,6 +13,7 @@ from claw_gauntlet.family import family_payload, manifest_for
 from claw_gauntlet.github_claws import GitHubAPIError, GitHubPublicCollector
 from claw_gauntlet.improvement import ImprovementCoordinator, ImprovementProposal
 from claw_gauntlet.project_claw import evaluate_repository
+from claw_gauntlet.publication import PublicationBundle, publisher_request
 from claw_gauntlet.rrs import score_run
 from claw_gauntlet.run_ledger import RunLedger, RunScore
 from claw_gauntlet.run_record import RunRecord
@@ -89,6 +90,19 @@ def _parser() -> argparse.ArgumentParser:
     _add_state_dir(project_evaluate)
     project_evaluate.add_argument("--artifact-ref", required=True)
     project_evaluate.add_argument("--input", type=Path, required=True)
+
+    publication = subparsers.add_parser("publication")
+    publication_commands = publication.add_subparsers(
+        dest="publication_command",
+        required=True,
+    )
+    publication_bundle = publication_commands.add_parser("bundle")
+    _add_state_dir(publication_bundle)
+    publication_bundle.add_argument("--channel", choices=("blog", "twitter"), required=True)
+    publication_bundle.add_argument("--input", type=Path, required=True)
+    publication_request = publication_commands.add_parser("request")
+    _add_state_dir(publication_request)
+    publication_request.add_argument("bundle_ref")
     return parser
 
 
@@ -256,6 +270,51 @@ def _foundation_command(args: argparse.Namespace) -> dict[str, Any]:
             "evaluation": evaluation,
             "run": record.to_dict(),
             "status": "evaluated",
+        }
+
+    if args.command == "publication" and args.publication_command == "bundle":
+        started_at = monotonic_ns()
+        publication_input = _read_json_object(args.input)
+        bundle = PublicationBundle.create(
+            channel=args.channel,
+            title=publication_input["title"],
+            content=publication_input["content"],
+            artifact_refs=publication_input["artifact_refs"],
+            source_urls=publication_input["source_urls"],
+        )
+        bundle_reference = evidence_store.put_json(bundle.to_dict())
+        duration_ms = max(0, round((monotonic_ns() - started_at) / 1_000_000))
+        with RunLedger(state_root / "runs.duckdb") as ledger:
+            record = _record_success(
+                ledger,
+                claw_name="BlogClaw" if bundle.channel == "blog" else "TwitterClaw",
+                input_payload={
+                    "artifact_refs": list(bundle.artifact_refs),
+                    "channel": bundle.channel,
+                    "content_hash": bundle.content_hash,
+                    "source_urls": list(bundle.source_urls),
+                    "title": bundle.title,
+                },
+                artifact_refs=[bundle_reference.uri],
+                duration_ms=duration_ms,
+            )
+        return {
+            "artifact_ref": bundle_reference.uri,
+            "bundle": bundle.to_dict(),
+            "run": record.to_dict(),
+            "status": "bundled",
+        }
+
+    if args.command == "publication" and args.publication_command == "request":
+        bundle_reference = _evidence_ref(args.bundle_ref)
+        bundle = PublicationBundle.from_dict(evidence_store.get_json(bundle_reference))
+        request = publisher_request(bundle, bundle_ref=bundle_reference.uri)
+        JsonlMailTransport(
+            state_root / "mail" / "publisher-requests.jsonl"
+        ).send(request)
+        return {
+            "handoff": request.to_dict(),
+            "status": "approval-requested",
         }
 
     ledger_path = state_root / "runs.duckdb"

@@ -20,11 +20,13 @@ trusting a confident summary.
   bounded improvement proposals, and reference-only Agent Mail outboxes.
 - Anonymous, read-only GHClaw and StarClaw collection plus deterministic,
   cited ProjectClaw screening of public repository evidence.
+- Immutable BlogClaw and TwitterClaw draft bundles with reference-only,
+  approval-required Publisher requests.
 - JSON CLI commands for inspecting the catalog and exercising the local
   evidence-to-improvement workflow.
 
 Working components report `experimental`; unimplemented catalog entries remain
-`planned`. External publishing is not yet implemented.
+`planned`. Outbound publishing is not implemented.
 
 ## Quick start
 
@@ -101,6 +103,7 @@ status and capability documentation say otherwise.
 - [Local foundation workflow](docs/foundation.md)
 - [Working capability index](docs/capabilities.md)
 - [GitHub public collection and project screening](docs/github.md)
+- [BlogClaw and TwitterClaw publishing workflow](docs/publishing.md)
 - [Reviewed Gas Town execution](docs/gastown.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

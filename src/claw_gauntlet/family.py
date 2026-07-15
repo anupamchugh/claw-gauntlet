@@ -43,8 +43,13 @@ _MANIFESTS = (
     _manifest("DigestClaw", "intelligence", ("digest.build",)),
     _manifest("ReleaseClaw", "delivery", ("release.verify",)),
     _manifest("DocsClaw", "delivery", ("docs.verify",)),
-    _manifest("BlogClaw", "delivery", ("blog.draft",)),
-    _manifest("TwitterClaw", "delivery", ("publication.bundle",)),
+    _manifest("BlogClaw", "delivery", ("blog.draft",), status="experimental"),
+    _manifest(
+        "TwitterClaw",
+        "delivery",
+        ("publication.bundle",),
+        status="experimental",
+    ),
     _manifest("BlogAgent", "agent", ("blog.conventions.apply",)),
     _manifest(
         "EvidenceStore",
