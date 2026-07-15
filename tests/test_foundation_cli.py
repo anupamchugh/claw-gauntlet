@@ -1,6 +1,7 @@
 import json
 from hashlib import sha256
 
+import claw_gauntlet.cli as cli_module
 from claw_gauntlet.cli import main
 
 
@@ -126,3 +127,142 @@ def test_foundation_command_returns_a_structured_error(tmp_path, capsys):
         "error": "run not found: missing-run",
         "status": "error",
     }
+
+
+def test_github_to_project_cli_slice_uses_immutable_evidence(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    repository_evidence = {
+        "schema": "claw.evidence.github-repository.v1",
+        "source_url": "https://api.github.com/repos/example/tool",
+        "observed_at": "2026-07-16T00:00:00Z",
+        "full_name": "example/tool",
+        "html_url": "https://github.com/example/tool",
+        "description": "Reliable agent workflow tooling",
+        "topics": ["agents", "workflow"],
+        "license_spdx": "MIT",
+        "language": "Python",
+        "archived": False,
+        "fork": False,
+        "stargazers_count": 42,
+        "forks_count": 3,
+        "open_issues_count": 2,
+        "pushed_at": "2026-07-15T12:00:00Z",
+        "default_branch": "main",
+    }
+
+    class FakeCollector:
+        def repository(self, repository):
+            assert repository == "example/tool"
+            return repository_evidence
+
+    monkeypatch.setattr(cli_module, "GitHubPublicCollector", FakeCollector)
+    state_dir = tmp_path / "state"
+    collected = _invoke(
+        [
+            "github",
+            "repo",
+            "--state-dir",
+            str(state_dir),
+            "example/tool",
+        ],
+        capsys,
+    )
+    assert collected["status"] == "collected"
+    assert collected["run"]["claw_name"] == "GHClaw"
+
+    project = tmp_path / "project.json"
+    project.write_text(
+        json.dumps(
+            {
+                "project_name": "Public Agent Workspace",
+                "keywords": ["agents", "swift"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluated = _invoke(
+        [
+            "project",
+            "evaluate",
+            "--state-dir",
+            str(state_dir),
+            "--artifact-ref",
+            collected["artifact_ref"],
+            "--input",
+            str(project),
+        ],
+        capsys,
+    )
+
+    assert evaluated["status"] == "evaluated"
+    assert evaluated["evaluation"]["decision"] == "candidate"
+    assert evaluated["evaluation"]["artifact_refs"] == [collected["artifact_ref"]]
+    assert evaluated["run"]["claw_name"] == "ProjectClaw"
+
+
+def test_publication_bundle_cli_creates_an_approval_gated_publisher_request(
+    tmp_path,
+    capsys,
+):
+    state_dir = tmp_path / "state"
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps({"claim": "Public evidence"}), encoding="utf-8")
+    stored = _invoke(
+        [
+            "evidence",
+            "put",
+            "--state-dir",
+            str(state_dir),
+            "--input",
+            str(source),
+        ],
+        capsys,
+    )
+    publication_input = tmp_path / "publication.json"
+    publication_input.write_text(
+        json.dumps(
+            {
+                "title": "Claw Gauntlet release",
+                "content": ["Evidence first. Publishing only after approval."],
+                "artifact_refs": [stored["artifact_ref"]],
+                "source_urls": ["https://github.com/example/tool"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundled = _invoke(
+        [
+            "publication",
+            "bundle",
+            "--channel",
+            "twitter",
+            "--state-dir",
+            str(state_dir),
+            "--input",
+            str(publication_input),
+        ],
+        capsys,
+    )
+    assert bundled["run"]["claw_name"] == "TwitterClaw"
+    assert bundled["bundle"]["approval_required"] is True
+
+    requested = _invoke(
+        [
+            "publication",
+            "request",
+            "--state-dir",
+            str(state_dir),
+            bundled["artifact_ref"],
+        ],
+        capsys,
+    )
+    assert requested["status"] == "approval-requested"
+    outbox = state_dir / "mail" / "publisher-requests.jsonl"
+    handoff = json.loads(outbox.read_text().strip())
+    assert handoff["approval_required"] is True
+    assert handoff["artifact_refs"] == [bundled["artifact_ref"]]
+    assert "Evidence first" not in outbox.read_text()

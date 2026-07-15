@@ -41,7 +41,10 @@ def test_family_json_lists_the_complete_planned_catalog(capsys):
         "Scheduler",
         "Dashboard",
     }
-    assert {item["status"] for item in payload["claws"]} == {"planned"}
+    assert {item["status"] for item in payload["claws"]} == {
+        "experimental",
+        "planned",
+    }
     assert by_name["BlogAgent"]["kind"] == "agent"
     assert by_name["Dashboard"]["kind"] == "interface"
     assert by_name["ReleaseClaw"]["kind"] == "delivery"
@@ -56,7 +59,7 @@ def test_manifest_json_is_case_insensitive_and_sorted(capsys):
     assert output == json.dumps(payload, sort_keys=True) + "\n"
     assert payload["name"] == "RRSClaw"
     assert payload["capabilities"] == ["run.score", "run.regression"]
-    assert payload["status"] == "planned"
+    assert payload["status"] == "experimental"
 
 
 def test_manifest_rejects_an_unknown_name(capsys):

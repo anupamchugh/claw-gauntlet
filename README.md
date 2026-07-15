@@ -18,12 +18,15 @@ trusting a confident summary.
   SHA-256 references, integrity verification, and path-hardening tests.
 - A DuckDB run ledger, deterministic Reliability/Resilience/Safety scoring,
   bounded improvement proposals, and reference-only Agent Mail outboxes.
+- Anonymous, read-only GHClaw and StarClaw collection plus deterministic,
+  cited ProjectClaw screening of public repository evidence.
+- Immutable BlogClaw and TwitterClaw draft bundles with reference-only,
+  approval-required Publisher requests.
 - JSON CLI commands for inspecting the catalog and exercising the local
   evidence-to-improvement workflow.
 
-Every catalog entry currently reports `planned`. The foundation types above are
-implemented and tested; source-specific collection and external publishing are
-not yet implemented.
+Working components report `experimental`; unimplemented catalog entries remain
+`planned`. Outbound publishing is not implemented.
 
 ## Quick start
 
@@ -42,9 +45,10 @@ uv run clawgauntlet family --json
 uv run clawgauntlet manifest rrsclaw --json
 ```
 
-The commands print deterministic JSON. The stateful commands require an
+The commands print structured JSON. The stateful commands require an
 explicit `--state-dir`; see the [local foundation workflow](docs/foundation.md).
-They do not collect data, contact a publishing platform, or use credentials.
+GitHub commands collect only public metadata through anonymous read-only API
+requests. No command contacts a publishing platform or uses credentials.
 
 ## RSSClaw and RRSClaw
 
@@ -66,9 +70,9 @@ YouTube collection is implemented yet.
 ## Architecture
 
 ```text
-public source
-    -> bounded collector (planned)
-    -> normalized entry and evidence reference (planned)
+public GitHub source
+    -> bounded anonymous collector (working)
+    -> normalized repository evidence reference (working)
     -> content-addressed EvidenceStore (working)
     -> RunRecord and handoff (working)
     -> RRS evaluation (working)
@@ -98,6 +102,8 @@ status and capability documentation say otherwise.
 - [Incremental foundation plan](docs/superpowers/plans/2026-07-16-claw-foundation-v1.md)
 - [Local foundation workflow](docs/foundation.md)
 - [Working capability index](docs/capabilities.md)
+- [GitHub public collection and project screening](docs/github.md)
+- [BlogClaw and TwitterClaw publishing workflow](docs/publishing.md)
 - [Reviewed Gas Town execution](docs/gastown.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
