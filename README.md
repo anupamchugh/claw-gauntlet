@@ -97,6 +97,8 @@ status and capability documentation say otherwise.
 - [V1/V2 design and safety model](docs/superpowers/specs/2026-07-16-claw-family-v1-v2-design.md)
 - [Incremental foundation plan](docs/superpowers/plans/2026-07-16-claw-foundation-v1.md)
 - [Local foundation workflow](docs/foundation.md)
+- [Working capability index](docs/capabilities.md)
+- [Reviewed Gas Town execution](docs/gastown.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Support and sponsorship](SUPPORT.md)
