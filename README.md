@@ -16,11 +16,13 @@ trusting a confident summary.
 - Versioned, validated handoff envelopes and run records.
 - A POSIX-only local content-addressed evidence store with canonical JSON,
   SHA-256 references, integrity verification, and path-hardening tests.
-- Portable read-only CLI commands for inspecting the catalog and individual
-  manifests on platforms supported by Python 3.12.
+- A DuckDB run ledger, deterministic Reliability/Resilience/Safety scoring,
+  bounded improvement proposals, and reference-only Agent Mail outboxes.
+- JSON CLI commands for inspecting the catalog and exercising the local
+  evidence-to-improvement workflow.
 
 Every catalog entry currently reports `planned`. The foundation types above are
-implemented and tested; the source-specific Claws and end-to-end workflows are
+implemented and tested; source-specific collection and external publishing are
 not yet implemented.
 
 ## Quick start
@@ -40,8 +42,9 @@ uv run clawgauntlet family --json
 uv run clawgauntlet manifest rrsclaw --json
 ```
 
-The commands print deterministic JSON. They do not collect data, contact a
-publishing platform, or use credentials.
+The commands print deterministic JSON. The stateful commands require an
+explicit `--state-dir`; see the [local foundation workflow](docs/foundation.md).
+They do not collect data, contact a publishing platform, or use credentials.
 
 ## RSSClaw and RRSClaw
 
@@ -68,7 +71,7 @@ public source
     -> normalized entry and evidence reference (planned)
     -> content-addressed EvidenceStore (working)
     -> RunRecord and handoff (working)
-    -> RRS evaluation (planned)
+    -> RRS evaluation (working)
     -> human-approved delivery (planned)
 ```
 
@@ -93,6 +96,7 @@ status and capability documentation say otherwise.
 
 - [V1/V2 design and safety model](docs/superpowers/specs/2026-07-16-claw-family-v1-v2-design.md)
 - [Incremental foundation plan](docs/superpowers/plans/2026-07-16-claw-foundation-v1.md)
+- [Local foundation workflow](docs/foundation.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Support and sponsorship](SUPPORT.md)
