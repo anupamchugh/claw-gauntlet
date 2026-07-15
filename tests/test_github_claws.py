@@ -105,3 +105,19 @@ def test_private_repository_payload_fails_closed():
     collector = GitHubPublicCollector(fetch_json=lambda _: _repo(private=True))
     with pytest.raises(ValueError, match="public repository"):
         collector.repository("example/tool")
+
+
+def test_star_diff_rejects_truncated_or_cross_account_snapshots():
+    complete = {
+        "schema": "claw.evidence.github-stars.v1",
+        "username": "obra",
+        "complete": True,
+        "repositories": [_repo("one/alpha")],
+    }
+    truncated = {**complete, "complete": False}
+    another_user = {**complete, "username": "steipete"}
+
+    with pytest.raises(ValueError, match="complete snapshots"):
+        diff_star_snapshots(complete, truncated)
+    with pytest.raises(ValueError, match="same GitHub account"):
+        diff_star_snapshots(complete, another_user)

@@ -33,8 +33,10 @@ have truncated the list. A snapshot is a public bookmark watchlist, not an
 endorsement by the account owner.
 
 The library function `diff_star_snapshots(previous, current)` returns sorted
-`added` and `removed` repository names. A scheduler can call the bounded
-snapshot command later; scheduling is not part of the connector itself.
+`added` and `removed` repository names only when both snapshots are complete and
+belong to the same account. It fails closed otherwise so pagination truncation
+cannot become a false removal. A scheduler can call the bounded snapshot command
+later; scheduling is not part of the connector itself.
 
 GitHub documents the public starred-repositories endpoint and its pagination at
 <https://docs.github.com/en/rest/activity/starring>. The connector sends the

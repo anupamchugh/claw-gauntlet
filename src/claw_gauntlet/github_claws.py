@@ -204,6 +204,11 @@ def diff_star_snapshots(
             raise ValueError(f"{name} must be a GitHub stars snapshot")
         if type(snapshot.get("repositories")) is not list:
             raise ValueError(f"{name} repositories must be a list")
+        if snapshot.get("complete") is not True:
+            raise ValueError("star deltas require two complete snapshots")
+        _username(snapshot.get("username"))
+    if previous["username"].casefold() != current["username"].casefold():
+        raise ValueError("star deltas require snapshots for the same GitHub account")
     previous_names = {item["full_name"] for item in previous["repositories"]}
     current_names = {item["full_name"] for item in current["repositories"]}
     return {
