@@ -255,6 +255,8 @@ An `Entry` records a deterministic entry ID, source ID, transport, source-native
 
 Deduplication proceeds conservatively: exact canonical URL, stable source ID or message ID, and then a content fingerprint. A probable match never destroys provenance; it joins transport observations beneath one entry and can be split by a correction. The reveal engine produces time-bounded themes, changes, disagreements, and project links with evidence references and confidence. `compare` uses the same entries and shows missing coverage rather than treating silence as a position.
 
+The `ios-builders` starter collection includes iOS Dev Weekly. Its canonical site advertises `https://iosdevweekly.com/issues.rss`; public issue pages provide a bounded archive/backfill route if the feed window is shorter than the desired history. The source registry makes subscriptions recoverable: each source has a stable ID, collection membership, canonical site, discovered endpoints, transport priority, first/last observation, latest entry, HTTP validators, consecutive failures, health state, and correction history. Users can export and re-import the registry as versioned JSON or OPML plus a Claw metadata sidecar, so restoring a collection does not depend on remembering each URL or retaining a mailbox.
+
 Source-pack health is measured per source: discovery success, parse success, freshness, conditional-request support, duplicate rate, canonical-link stability, provenance completeness, retries, and human corrections. RRSClaw evaluates those measurements. A broken source opens an improvement Bead; it never silently disappears from a digest.
 
 ### DigestClaw
