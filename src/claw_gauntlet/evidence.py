@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
 import errno
+import fcntl
 from hashlib import sha256
 import json
 import os
@@ -19,8 +20,9 @@ _O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 _DIRECTORY_FLAGS = os.O_RDONLY | _O_CLOEXEC | _O_DIRECTORY | _O_NOFOLLOW
 _READ_FLAGS = os.O_RDONLY | _O_CLOEXEC | _O_NOFOLLOW | _O_NONBLOCK
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_CLOEXEC | _O_NOFOLLOW
+_LOCK_FLAGS = os.O_RDWR | os.O_CREAT | _O_CLOEXEC | _O_NOFOLLOW
 _SYMLINK_ERRORS = {errno.ELOOP, errno.ENOTDIR}
-_REQUIRED_DIR_FD_FUNCTIONS = (os.open, os.mkdir, os.unlink, os.rename)
+_REQUIRED_DIR_FD_FUNCTIONS = (os.open, os.mkdir, os.unlink, os.rename, os.stat)
 
 
 class EvidenceIntegrityError(OSError):
@@ -52,6 +54,7 @@ class EvidenceStore:
     must be owned by the effective user and not group- or world-writable. Each
     write also verifies directory identity before and after replacement so a
     detected relocation is cleaned through the retained descriptor and fails.
+    Cooperating writers serialize each digest with a POSIX advisory file lock.
     """
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
@@ -77,41 +80,75 @@ class EvidenceStore:
         reference = EvidenceRef(algorithm="sha256", digest=digest)
         with self._artifact_directory(reference, create=True) as directory_chain:
             root_fd, algorithm_fd, directory_fd = directory_chain
-            descriptor, temporary_name = self._create_temporary_file(
+            with self._digest_lock(directory_fd, digest):
+                self._put_locked(
+                    content,
+                    reference,
+                    root_fd,
+                    algorithm_fd,
+                    directory_fd,
+                )
+        return reference
+
+    def _put_locked(
+        self,
+        content: bytes,
+        reference: EvidenceRef,
+        root_fd: int,
+        algorithm_fd: int,
+        directory_fd: int,
+    ) -> None:
+        digest = reference.digest
+        descriptor, temporary_name = self._create_temporary_file(
+            directory_fd,
+            digest,
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as temporary:
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+                metadata = os.fstat(temporary.fileno())
+                installed_identity = (metadata.st_dev, metadata.st_ino)
+        except BaseException:
+            self._cleanup_name(directory_fd, temporary_name)
+            raise
+
+        try:
+            self._assert_directory_chain(
+                reference,
+                root_fd,
+                algorithm_fd,
+                directory_fd,
+            )
+            os.replace(
+                temporary_name,
+                digest,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+        except BaseException:
+            self._cleanup_name(directory_fd, temporary_name)
+            raise
+
+        # The leaf is fully written and file-fsynced. A directory-fsync error
+        # means durability is uncertain, so preserve the valid committed leaf.
+        os.fsync(directory_fd)
+
+        try:
+            self._assert_directory_chain(
+                reference,
+                root_fd,
+                algorithm_fd,
+                directory_fd,
+            )
+        except BaseException:
+            self._cleanup_installed_inode(
                 directory_fd,
                 digest,
+                installed_identity,
             )
-            replaced = False
-            try:
-                with os.fdopen(descriptor, "wb") as temporary:
-                    temporary.write(content)
-                    temporary.flush()
-                    os.fsync(temporary.fileno())
-                self._assert_directory_chain(
-                    reference,
-                    root_fd,
-                    algorithm_fd,
-                    directory_fd,
-                )
-                os.replace(
-                    temporary_name,
-                    digest,
-                    src_dir_fd=directory_fd,
-                    dst_dir_fd=directory_fd,
-                )
-                replaced = True
-                os.fsync(directory_fd)
-                self._assert_directory_chain(
-                    reference,
-                    root_fd,
-                    algorithm_fd,
-                    directory_fd,
-                )
-            except BaseException:
-                cleanup_name = digest if replaced else temporary_name
-                self._cleanup_failed_put(directory_fd, cleanup_name)
-                raise
-        return reference
+            raise
 
     def put_json(self, value: Any) -> EvidenceRef:
         canonical = json.dumps(
@@ -195,7 +232,7 @@ class EvidenceStore:
 
     def _open_root(self, *, create: bool) -> int:
         if create:
-            self.root.mkdir(parents=True, exist_ok=True)
+            self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         try:
             descriptor = os.open(self.root, _DIRECTORY_FLAGS)
         except OSError as error:
@@ -281,12 +318,57 @@ class EvidenceStore:
             )
 
     @staticmethod
-    def _cleanup_failed_put(directory_fd: int, name: str) -> None:
+    def _cleanup_name(directory_fd: int, name: str) -> None:
         try:
             os.unlink(name, dir_fd=directory_fd)
         except FileNotFoundError:
             return
         os.fsync(directory_fd)
+
+    @staticmethod
+    def _cleanup_installed_inode(
+        directory_fd: int,
+        name: str,
+        installed_identity: tuple[int, int],
+    ) -> None:
+        try:
+            metadata = os.stat(
+                name,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return
+        if (metadata.st_dev, metadata.st_ino) != installed_identity:
+            return
+        os.unlink(name, dir_fd=directory_fd)
+        os.fsync(directory_fd)
+
+    @contextmanager
+    def _digest_lock(self, directory_fd: int, digest: str):
+        name = f".{digest}.lock"
+        try:
+            descriptor = os.open(
+                name,
+                _LOCK_FLAGS,
+                mode=0o600,
+                dir_fd=directory_fd,
+            )
+        except OSError as error:
+            raise EvidenceIntegrityError("evidence digest lock is unsafe") from error
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_uid != os.geteuid()
+                or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            ):
+                raise EvidenceIntegrityError("evidence digest lock is unsafe")
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(descriptor)
 
     @staticmethod
     def _create_temporary_file(directory_fd: int, digest: str) -> tuple[int, str]:

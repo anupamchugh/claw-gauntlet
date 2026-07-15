@@ -98,7 +98,10 @@ def test_put_bytes_replaces_from_a_temporary_file_in_the_target_directory(
     assert len(replacements) == 1
     assert replacements[0][1] == Path(reference.digest)
     assert expected.read_bytes() == b"atomic evidence"
-    assert list(expected.parent.iterdir()) == [expected]
+    assert expected in expected.parent.iterdir()
+    assert not [
+        path for path in expected.parent.iterdir() if path.name.endswith(".tmp")
+    ]
 
 
 def test_put_bytes_fsyncs_artifact_and_parent_directory(tmp_path, monkeypatch):
@@ -130,8 +133,94 @@ def test_failed_atomic_replace_removes_the_temporary_file(tmp_path, monkeypatch)
         store.put_bytes(b"will not be stored")
 
     assert not [
-        path for path in (tmp_path / "evidence").rglob("*") if path.is_file()
+        path
+        for path in (tmp_path / "evidence").rglob("*")
+        if path.is_file() and not path.name.endswith(".lock")
     ]
+
+
+def test_directory_fsync_failure_preserves_preexisting_valid_artifact(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    content = b"stable"
+    reference = store.put_bytes(content)
+    target = _artifact_target(root, reference)
+    real_fsync = evidence_module.os.fsync
+
+    def fail_directory_fsync(descriptor):
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("directory fsync failed")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(evidence_module.os, "fsync", fail_directory_fsync)
+
+    with pytest.raises(OSError, match="directory fsync failed"):
+        store.put_bytes(content)
+
+    assert target.read_bytes() == content
+    assert store.verify(reference)
+
+
+def test_failing_writer_does_not_delete_concurrent_same_digest_replacement(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    content = b"same digest"
+    reference = store.put_bytes(content)
+    target = _artifact_target(root, reference)
+    real_fsync = evidence_module.os.fsync
+    real_replace = evidence_module.os.replace
+    concurrent_identity = None
+    injected = False
+
+    def install_concurrent_replacement_then_fail(descriptor):
+        nonlocal concurrent_identity, injected
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode) or injected:
+            real_fsync(descriptor)
+            return
+        injected = True
+        concurrent_name = f".{reference.digest}.concurrent"
+        concurrent_fd = os.open(
+            concurrent_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            mode=0o600,
+            dir_fd=descriptor,
+        )
+        try:
+            os.write(concurrent_fd, content)
+            real_fsync(concurrent_fd)
+        finally:
+            os.close(concurrent_fd)
+        real_replace(
+            concurrent_name,
+            reference.digest,
+            src_dir_fd=descriptor,
+            dst_dir_fd=descriptor,
+        )
+        metadata = os.stat(
+            reference.digest,
+            dir_fd=descriptor,
+            follow_symlinks=False,
+        )
+        concurrent_identity = (metadata.st_dev, metadata.st_ino)
+        raise OSError("directory fsync failed after concurrent replace")
+
+    monkeypatch.setattr(
+        evidence_module.os,
+        "fsync",
+        install_concurrent_replacement_then_fail,
+    )
+
+    with pytest.raises(OSError, match="concurrent replace"):
+        store.put_bytes(content)
+
+    metadata = target.stat()
+    assert (metadata.st_dev, metadata.st_ino) == concurrent_identity
+    assert target.read_bytes() == content
+    assert store.verify(reference)
 
 
 def test_directory_swap_to_symlink_cannot_redirect_write_outside_root(
@@ -218,6 +307,19 @@ def test_store_rejects_group_or_world_writable_root(tmp_path):
 
     with pytest.raises(PermissionError, match="writable"):
         store.put_bytes(b"untrusted root")
+
+
+def test_store_creates_root_mode_0700_under_permissive_umask(tmp_path):
+    root = tmp_path / "evidence"
+    store = EvidenceStore(root)
+    previous_umask = os.umask(0)
+    try:
+        reference = store.put_bytes(b"restrictive root")
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert store.verify(reference)
 
 
 def test_corruption_fails_verification_and_verified_read(tmp_path):
