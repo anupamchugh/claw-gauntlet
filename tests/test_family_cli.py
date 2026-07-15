@@ -1,17 +1,67 @@
 import json
 
+import pytest
+
 from claw_gauntlet.cli import main
 
 
-def test_family_json_lists_available_and_planned_claws(capsys):
+def test_family_json_lists_the_complete_planned_catalog(capsys):
     assert main(["family", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     by_name = {item["name"]: item for item in payload["claws"]}
 
-    assert by_name["StarClaw"]["status"] == "available"
-    assert by_name["GHClaw"]["status"] == "available"
-    assert by_name["ReleaseClaw"]["status"] == "planned"
-    assert by_name["ProjectClaw"]["status"] == "available"
-    assert by_name["DigestClaw"]["status"] == "available"
-    assert by_name["BirdClaw"]["status"] == "planned"
-    assert by_name["AgentMailTransport"]["kind"] == "infrastructure"
+    assert len(payload["claws"]) == 28
+    assert set(by_name) == {
+        "StarClaw",
+        "GHClaw",
+        "HNClaw",
+        "RSSClaw",
+        "ProjectClaw",
+        "TrustClaw",
+        "RRSClaw",
+        "DigestClaw",
+        "ReleaseClaw",
+        "DocsClaw",
+        "BlogClaw",
+        "TwitterClaw",
+        "BlogAgent",
+        "EvidenceStore",
+        "TaskLedgerAdapter",
+        "AgentMailTransport",
+        "SandboxRunner",
+        "ForkClaw",
+        "BirdClaw",
+        "PaperClaw",
+        "AppClaw",
+        "PeopleClaw",
+        "SkillClaw",
+        "CassMemoryAdapter",
+        "MCPServer",
+        "CredentialArbiter",
+        "Scheduler",
+        "Dashboard",
+    }
+    assert {item["status"] for item in payload["claws"]} == {"planned"}
+    assert by_name["BlogAgent"]["kind"] == "agent"
+    assert by_name["Dashboard"]["kind"] == "interface"
+    assert by_name["ReleaseClaw"]["kind"] == "delivery"
+    assert by_name["EvidenceStore"]["kind"] == "infrastructure"
+
+
+def test_manifest_json_is_case_insensitive_and_sorted(capsys):
+    assert main(["manifest", "rrsclaw", "--json"]) == 0
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert output == json.dumps(payload, sort_keys=True) + "\n"
+    assert payload["name"] == "RRSClaw"
+    assert payload["capabilities"] == ["run.score", "run.regression"]
+    assert payload["status"] == "planned"
+
+
+def test_manifest_rejects_an_unknown_name(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        main(["manifest", "MissingClaw", "--json"])
+
+    assert exc_info.value.code == 2
+    assert "unknown manifest: MissingClaw" in capsys.readouterr().err
