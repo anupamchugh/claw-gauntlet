@@ -1,2 +1,7 @@
 .worktrees/
 .superpowers/
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.claw/

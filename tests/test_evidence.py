@@ -1,0 +1,162 @@
+from dataclasses import FrozenInstanceError
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+
+from claw_gauntlet import evidence as evidence_module
+from claw_gauntlet.evidence import EvidenceRef, EvidenceStore
+
+
+def test_put_is_content_addressed_idempotent_and_verified(tmp_path):
+    store = EvidenceStore(tmp_path / "evidence")
+    first = store.put_json({"source": "public", "items": [1, 2]})
+    second = store.put_json({"items": [1, 2], "source": "public"})
+
+    assert first == second
+    assert first.uri.startswith("evidence://sha256/")
+    assert store.get_json(first) == {"items": [1, 2], "source": "public"}
+    assert store.verify(first)
+
+
+def test_put_json_uses_compact_sorted_utf8_canonical_bytes(tmp_path):
+    store = EvidenceStore(tmp_path / "evidence")
+    canonical = '{"a":1,"b":2,"é":"☃"}'.encode("utf-8")
+
+    reference = store.put_json({"é": "☃", "b": 2, "a": 1})
+
+    assert reference.digest == sha256(canonical).hexdigest()
+    assert store.get_bytes(reference) == canonical
+
+
+def test_put_bytes_replaces_from_a_temporary_file_in_the_target_directory(
+    tmp_path, monkeypatch
+):
+    store = EvidenceStore(tmp_path / "evidence")
+    replacements = []
+    real_replace = evidence_module.os.replace
+
+    def record_replace(source, destination):
+        source_path = Path(source)
+        destination_path = Path(destination)
+        assert source_path.parent == destination_path.parent
+        assert source_path.is_file()
+        replacements.append((source_path, destination_path))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(evidence_module.os, "replace", record_replace)
+
+    reference = store.put_bytes(b"atomic evidence")
+
+    expected = (
+        tmp_path
+        / "evidence"
+        / "sha256"
+        / reference.digest[:2]
+        / reference.digest
+    )
+    assert len(replacements) == 1
+    assert replacements[0][1] == expected
+    assert expected.read_bytes() == b"atomic evidence"
+    assert list(expected.parent.iterdir()) == [expected]
+
+
+def test_failed_atomic_replace_removes_the_temporary_file(tmp_path, monkeypatch):
+    store = EvidenceStore(tmp_path / "evidence")
+
+    def fail_replace(source, destination):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(evidence_module.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        store.put_bytes(b"will not be stored")
+
+    assert not [
+        path for path in (tmp_path / "evidence").rglob("*") if path.is_file()
+    ]
+
+
+def test_corruption_fails_verification_and_verified_read(tmp_path):
+    store = EvidenceStore(tmp_path / "evidence")
+    reference = store.put_bytes(b"trusted")
+    target = (
+        tmp_path
+        / "evidence"
+        / "sha256"
+        / reference.digest[:2]
+        / reference.digest
+    )
+    target.write_bytes(b"tampered")
+
+    assert store.verify(reference) is False
+    with pytest.raises(evidence_module.EvidenceIntegrityError, match="digest mismatch"):
+        store.get_bytes(reference)
+
+
+def test_repeated_put_repairs_corrupt_content_at_the_same_reference(tmp_path):
+    store = EvidenceStore(tmp_path / "evidence")
+    reference = store.put_bytes(b"stable")
+    target = (
+        tmp_path
+        / "evidence"
+        / "sha256"
+        / reference.digest[:2]
+        / reference.digest
+    )
+    target.write_bytes(b"corrupt")
+
+    repeated = store.put_bytes(b"stable")
+
+    assert repeated == reference
+    assert store.get_bytes(reference) == b"stable"
+
+
+def test_valid_missing_reference_raises_file_not_found(tmp_path):
+    store = EvidenceStore(tmp_path / "evidence")
+    missing = EvidenceRef(algorithm="sha256", digest="0" * 64)
+
+    with pytest.raises(FileNotFoundError):
+        store.get_bytes(missing)
+    assert store.verify(missing) is False
+
+
+def test_evidence_ref_is_immutable_and_normalizes_sha256_hex_to_lowercase():
+    reference = EvidenceRef(algorithm="sha256", digest="A" * 64)
+
+    assert reference.digest == "a" * 64
+    assert reference.uri == f"evidence://sha256/{'a' * 64}"
+    with pytest.raises(FrozenInstanceError):
+        reference.digest = "0" * 64
+
+
+@pytest.mark.parametrize(
+    ("algorithm", "digest"),
+    [
+        ("sha1", "0" * 64),
+        ("../sha256", "0" * 64),
+        ("sha256", "../" + "0" * 61),
+        ("sha256", "g" * 64),
+        ("sha256", "0" * 63),
+    ],
+)
+def test_evidence_ref_rejects_unsupported_or_malformed_values(algorithm, digest):
+    with pytest.raises(ValueError):
+        EvidenceRef(algorithm=algorithm, digest=digest)
+
+
+def test_store_rejects_symlink_escape_from_root(tmp_path):
+    root = tmp_path / "evidence"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "sha256").symlink_to(outside, target_is_directory=True)
+    reference = EvidenceRef(algorithm="sha256", digest="0" * 64)
+    escaped_target = outside / "00" / reference.digest
+    escaped_target.parent.mkdir()
+    escaped_target.write_bytes(b"outside the evidence root")
+
+    store = EvidenceStore(root)
+
+    with pytest.raises(ValueError, match="outside evidence root"):
+        store.get_bytes(reference)
