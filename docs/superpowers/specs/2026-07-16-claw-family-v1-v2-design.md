@@ -134,21 +134,21 @@ Claws pass references, not secrets or large payloads. The V1 envelope contains:
 
 ```json
 {
-  "handoff_id": "01J...",
+  "handoff_id": "123e4567e89b42d3a456426614174000",
   "created_at": "2026-07-16T12:00:00Z",
   "protocol_version": "1.0.0",
   "from": "ghclaw",
   "to": "docsclaw",
-  "artifact_refs": ["evidence://sha256/..."],
+  "artifact_refs": ["evidence://sha256/c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c"],
   "requested_action": "update-release-docs",
   "summary": "Three user-facing changes need documentation.",
   "provenance": ["https://github.com/example/project/releases/tag/v1.0.0"],
-  "checksum": "sha256:...",
+  "checksum": "sha256:b8699645b752c44ac547cd72d0d326f0dae7d49088793a39baf1e54897e1fa7c",
   "approval_required": false
 }
 ```
 
-The evidence store verifies the checksum when a receiving Claw opens an artifact. Unsupported major protocol versions fail closed. Missing artifacts, invalid checksums, or insufficient permissions create a blocked Bead and a clear Agent Mail response.
+Artifact references use `evidence://sha256/<64-hex-digest>` and are normalized to lowercase. The envelope checksum is SHA-256 over the UTF-8 bytes of the ordered `artifact_refs` list encoded as compact JSON with separators `(",", ":")`; references are normalized before encoding and their order is preserved. For the example above, the exact canonical bytes are `["evidence://sha256/c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c"]`. The evidence store verifies each artifact digest when a receiving Claw opens it. Unsupported major protocol versions fail closed. Missing artifacts, invalid checksums, or insufficient permissions create a blocked Bead and a clear Agent Mail response.
 
 ## Coordination
 
@@ -184,7 +184,7 @@ Checks provenance, maintenance signals, licenses, security advisories, suspiciou
 
 RRSClaw means Reliability, Resilience, and Safety Claw. It evaluates every Claw run against deterministic acceptance criteria before using model-based diagnosis. The score covers completion, reproducibility, provenance, retry and recovery behavior, permission compliance, cost, latency, and human corrections.
 
-Each run emits a versioned `RunRecord` with the Claw and protocol versions, input hash, artifact references, outcome, duration, retries, approvals, violations, and corrections. RRSClaw stores measurements in the run ledger, opens an improvement Bead when a regression is reproducible, and links the Bead to the evidence.
+Each run emits a versioned `RunRecord` with the Claw and protocol versions, input hash, artifact references, outcome, duration, retries, approvals, violations, and corrections. Input hashes use `sha256:<64-hex-digest>` and evidence references use the same normalized lowercase digest grammar as handoffs. RRSClaw stores measurements in the run ledger, opens an improvement Bead when a regression is reproducible, and links the Bead to the evidence.
 
 The self-improvement loop is bounded:
 

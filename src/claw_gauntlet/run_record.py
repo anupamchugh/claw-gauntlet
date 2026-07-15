@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,7 +13,10 @@ from claw_gauntlet.manifest import (
 
 
 _DEFAULT_PROTOCOL_VERSION = "1.0.0"
+_SUPPORTED_PROTOCOL_MAJOR = 1
 _OUTCOMES = {"success", "partial", "failure"}
+_SHA256 = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
+_EVIDENCE_REF = re.compile(r"^evidence://sha256/([0-9a-fA-F]{64})$")
 
 
 def new_run_id() -> str:
@@ -56,6 +60,40 @@ def _semantic_version(value: Any, field: str) -> str:
     return value
 
 
+def _protocol_version(value: Any) -> str:
+    value = _semantic_version(value, "protocol_version")
+    major = parse_semver(value)[0]
+    if major != _SUPPORTED_PROTOCOL_MAJOR:
+        raise ValueError(
+            f"unsupported protocol major: expected {_SUPPORTED_PROTOCOL_MAJOR}, got {major}"
+        )
+    return value
+
+
+def _sha256_value(value: Any, field: str) -> str:
+    value = _nonempty_string(value, field)
+    match = _SHA256.fullmatch(value)
+    if match is None:
+        raise ValueError(f"{field} must use sha256:<64-hex-digest> format")
+    return f"sha256:{match.group(1).lower()}"
+
+
+def _artifact_refs(value: Any, *, payload: bool = False) -> tuple[str, ...]:
+    if payload:
+        items = _payload_string_list(value, "artifact_refs")
+    else:
+        items = _string_tuple(value, "artifact_refs")
+    normalized = []
+    for item in items:
+        match = _EVIDENCE_REF.fullmatch(item)
+        if match is None:
+            raise ValueError(
+                "artifact_refs must contain only evidence://sha256/<64-hex-digest> references"
+            )
+        normalized.append(f"evidence://sha256/{match.group(1).lower()}")
+    return tuple(normalized)
+
+
 def _nonnegative_int(value: Any, field: str) -> int:
     if type(value) is not int or value < 0:
         raise ValueError(f"{field} must be a nonnegative integer")
@@ -82,14 +120,14 @@ class RunRecord:
     def __post_init__(self) -> None:
         _uuid4_hex(self.run_id, "run_id")
         _utc_timestamp(self.created_at, "created_at")
-        _semantic_version(self.protocol_version, "protocol_version")
+        _protocol_version(self.protocol_version)
         _nonempty_string(self.claw_name, "claw_name")
         _semantic_version(self.claw_version, "claw_version")
-        _nonempty_string(self.input_hash, "input_hash")
+        object.__setattr__(self, "input_hash", _sha256_value(self.input_hash, "input_hash"))
         object.__setattr__(
             self,
             "artifact_refs",
-            _string_tuple(self.artifact_refs, "artifact_refs"),
+            _artifact_refs(self.artifact_refs),
         )
         _nonempty_string(self.outcome, "outcome")
         if self.outcome not in _OUTCOMES:
@@ -163,11 +201,11 @@ class RunRecord:
         return cls(
             run_id=_uuid4_hex(payload["run_id"], "run_id"),
             created_at=_utc_timestamp(payload["created_at"], "created_at"),
-            protocol_version=_semantic_version(payload["protocol_version"], "protocol_version"),
+            protocol_version=_protocol_version(payload["protocol_version"]),
             claw_name=_nonempty_string(payload["claw_name"], "claw_name"),
             claw_version=_semantic_version(payload["claw_version"], "claw_version"),
-            input_hash=_nonempty_string(payload["input_hash"], "input_hash"),
-            artifact_refs=_payload_string_list(payload["artifact_refs"], "artifact_refs"),
+            input_hash=_sha256_value(payload["input_hash"], "input_hash"),
+            artifact_refs=_artifact_refs(payload["artifact_refs"], payload=True),
             outcome=_nonempty_string(payload["outcome"], "outcome"),
             duration_ms=_nonnegative_int(payload["duration_ms"], "duration_ms"),
             retries=_nonnegative_int(payload["retries"], "retries"),

@@ -1,10 +1,16 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import datetime
 from uuid import UUID
 
 import pytest
 
 from claw_gauntlet.run_record import RunRecord, new_run_id
+
+
+ARTIFACT_DIGEST = "c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c"
+ARTIFACT_REF = f"evidence://sha256/{ARTIFACT_DIGEST}"
+INPUT_DIGEST = "c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86803d8891675e76fd992c20"
+INPUT_HASH = f"sha256:{INPUT_DIGEST}"
 
 
 def _run_payload():
@@ -14,8 +20,8 @@ def _run_payload():
         "protocol_version": "1.0.0",
         "claw_name": "GHClaw",
         "claw_version": "0.1.0",
-        "input_hash": "sha256:input",
-        "artifact_refs": ["evidence://sha256/abc"],
+        "input_hash": INPUT_HASH,
+        "artifact_refs": [ARTIFACT_REF],
         "outcome": "success",
         "duration_ms": 25,
         "retries": 0,
@@ -30,8 +36,8 @@ def test_run_record_round_trip():
     record = RunRecord.create(
         claw_name="GHClaw",
         claw_version="0.1.0",
-        input_hash="sha256:input",
-        artifact_refs=("evidence://sha256/abc",),
+        input_hash=INPUT_HASH,
+        artifact_refs=(ARTIFACT_REF,),
         outcome="success",
         duration_ms=25,
         retries=0,
@@ -48,7 +54,7 @@ def test_run_record_create_uses_uuid4_utc_timestamp_and_protocol_default():
     record = RunRecord.create(
         claw_name="GHClaw",
         claw_version="0.1.0",
-        input_hash="sha256:input",
+        input_hash=INPUT_HASH,
         artifact_refs=(),
         outcome="partial",
         duration_ms=0,
@@ -74,11 +80,11 @@ def test_run_record_accepts_documented_outcomes(outcome):
 
 
 def test_run_record_is_immutable_and_copies_caller_owned_artifacts():
-    artifact_refs = ["evidence://sha256/abc"]
+    artifact_refs = [ARTIFACT_REF]
     record = RunRecord.create(
         claw_name="GHClaw",
         claw_version="0.1.0",
-        input_hash="sha256:input",
+        input_hash=INPUT_HASH,
         artifact_refs=artifact_refs,
         outcome="success",
         duration_ms=25,
@@ -90,7 +96,7 @@ def test_run_record_is_immutable_and_copies_caller_owned_artifacts():
     )
     artifact_refs.clear()
 
-    assert record.artifact_refs == ("evidence://sha256/abc",)
+    assert record.artifact_refs == (ARTIFACT_REF,)
     with pytest.raises(FrozenInstanceError):
         record.outcome = "failure"
 
@@ -140,7 +146,7 @@ def test_run_record_rejects_invalid_outcome():
         ("claw_name", ""),
         ("claw_version", 7),
         ("input_hash", None),
-        ("artifact_refs", ("evidence://sha256/abc",)),
+        ("artifact_refs", (ARTIFACT_REF,)),
         ("artifact_refs", [7]),
         ("outcome", None),
         ("duration_ms", True),
@@ -157,3 +163,53 @@ def test_run_record_from_dict_rejects_malformed_fields(field, value):
 
     with pytest.raises(ValueError, match=field):
         RunRecord.from_dict(payload)
+
+
+def test_run_record_rejects_unsupported_protocol_major_on_construction_and_parsing():
+    record = RunRecord.from_dict(_run_payload())
+    with pytest.raises(ValueError, match="unsupported protocol major"):
+        replace(record, protocol_version="2.0.0")
+
+    payload = _run_payload()
+    payload["protocol_version"] = "2.0.0"
+    with pytest.raises(ValueError, match="unsupported protocol major"):
+        RunRecord.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "input_hash",
+    ["sha256:" + "g" * 64, "sha256:" + "0" * 63, "md5:" + "0" * 64],
+)
+def test_run_record_rejects_malformed_input_hash(input_hash):
+    payload = _run_payload()
+    payload["input_hash"] = input_hash
+
+    with pytest.raises(ValueError, match="input_hash"):
+        RunRecord.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "artifact_ref",
+    [
+        "evidence://sha256/" + "0" * 63,
+        "evidence://sha1/" + ARTIFACT_DIGEST,
+        "https://example.com/artifact",
+    ],
+)
+def test_run_record_rejects_malformed_evidence_artifact_refs(artifact_ref):
+    payload = _run_payload()
+    payload["artifact_refs"] = [artifact_ref]
+
+    with pytest.raises(ValueError, match="artifact_refs"):
+        RunRecord.from_dict(payload)
+
+
+def test_run_record_normalizes_case_insensitive_sha256_hex_to_lowercase():
+    payload = _run_payload()
+    payload["input_hash"] = "sha256:" + INPUT_DIGEST.upper()
+    payload["artifact_refs"] = ["evidence://sha256/" + ARTIFACT_DIGEST.upper()]
+
+    record = RunRecord.from_dict(payload)
+
+    assert record.input_hash == INPUT_HASH
+    assert record.artifact_refs == (ARTIFACT_REF,)

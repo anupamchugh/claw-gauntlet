@@ -191,10 +191,10 @@ def test_handoff_round_trip_and_major_version_guard():
     handoff = HandoffEnvelope.create(
         source="GHClaw",
         destination="DocsClaw",
-        artifact_refs=("evidence://sha256/abc",),
+        artifact_refs=("evidence://sha256/c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c",),
         requested_action="update-release-docs",
         summary="Document one verified change.",
-        checksum="sha256:abc",
+        checksum="sha256:b8699645b752c44ac547cd72d0d326f0dae7d49088793a39baf1e54897e1fa7c",
         approval_required=False,
     )
     assert HandoffEnvelope.from_dict(handoff.to_dict()) == handoff
@@ -205,8 +205,8 @@ def test_run_record_round_trip():
     record = RunRecord.create(
         claw_name="GHClaw",
         claw_version="0.1.0",
-        input_hash="sha256:input",
-        artifact_refs=("evidence://sha256/abc",),
+        input_hash="sha256:c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86803d8891675e76fd992c20",
+        artifact_refs=("evidence://sha256/c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c",),
         outcome="success",
         duration_ms=25,
         retries=0,
@@ -226,7 +226,7 @@ Expected: FAIL with module import errors.
 
 - [ ] **Step 3: Implement immutable JSON records**
 
-Use frozen dataclasses, UTC ISO-8601 timestamps, UUID4 hex identifiers, tuple artifact references, and `to_dict`/`from_dict`. `RunRecord` accepts outcomes `success`, `partial`, or `failure`; rejects negative counters and durations; validates semantic versions. `HandoffEnvelope` requires non-empty source, destination, action, summary, checksum, and at least one artifact reference. `require_protocol_major(expected)` raises `ValueError` on mismatch.
+Use frozen dataclasses, UTC ISO-8601 timestamps, UUID4 hex identifiers, tuple artifact references, and `to_dict`/`from_dict`. Both records fail closed unless the protocol major is exactly `1`. SHA-256 values accept case-insensitive 64-hex input and normalize to lowercase. `RunRecord.input_hash` uses `sha256:<64-hex-digest>` and evidence references use `evidence://sha256/<64-hex-digest>`. `RunRecord` accepts outcomes `success`, `partial`, or `failure`; rejects negative counters and durations; validates semantic versions. `HandoffEnvelope` requires non-empty source, destination, action, summary, checksum, and at least one artifact reference. Its checksum is SHA-256 over the UTF-8 bytes of the normalized, ordered `artifact_refs` list encoded as compact JSON with separators `(",", ":")`. `require_protocol_major(expected)` raises `ValueError` on mismatch.
 
 - [ ] **Step 4: Add negative tests**
 
@@ -347,8 +347,8 @@ from claw_gauntlet.run_record import RunRecord
 def test_run_score_and_baseline_survive_reopen(tmp_path):
     path = tmp_path / "runs.duckdb"
     record = RunRecord.create(
-        claw_name="GHClaw", claw_version="0.1.0", input_hash="sha256:input",
-        artifact_refs=("evidence://sha256/abc",), outcome="success",
+        claw_name="GHClaw", claw_version="0.1.0", input_hash="sha256:c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86803d8891675e76fd992c20",
+        artifact_refs=("evidence://sha256/c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c",), outcome="success",
         duration_ms=20, retries=0, approvals_required=0, approvals_granted=0,
         permission_violations=0, human_corrections=0,
     )
@@ -413,8 +413,8 @@ from claw_gauntlet.run_record import RunRecord
 
 def good_run():
     return RunRecord.create(
-        claw_name="GHClaw", claw_version="0.1.0", input_hash="sha256:input",
-        artifact_refs=("evidence://sha256/abc",), outcome="success",
+        claw_name="GHClaw", claw_version="0.1.0", input_hash="sha256:c96c6d5be8d08a12e7b5cdc1b207fa6b2430974c86803d8891675e76fd992c20",
+        artifact_refs=("evidence://sha256/c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c",), outcome="success",
         duration_ms=20, retries=0, approvals_required=1, approvals_granted=1,
         permission_violations=0, human_corrections=0,
     )
