@@ -1,0 +1,71 @@
+name: Bug report
+description: Report reproducible incorrect behavior using public-safe evidence.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Claw Gauntlet. Never include secrets, private repository data, mailbox contents, personal exports, or customer identifiers.
+  - type: input
+    id: revision
+    attributes:
+      label: Revision
+      description: Commit SHA or released version where the bug occurs.
+      placeholder: 0123456789abcdef...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Capability manifest or catalog
+        - Handoff or run record
+        - Evidence store
+        - CLI
+        - Documentation or workflow
+        - Planned capability design
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide the smallest public-safe fixture and exact commands.
+      placeholder: |
+        1. uv sync
+        2. uv run ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and evidence
+      description: Include sanitized output or an evidence hash. Do not paste credentials or private data.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test result
+      description: Include the result of `uv run pytest -q` or explain why it could not run.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I removed secrets, private data, mailbox contents, personal exports, and customer identifiers.
+          required: true
+        - label: Reproduction does not post, message, vote, solicit engagement, or contact people autonomously.
+          required: true
+        - label: This is not a vulnerability report; security issues belong in a private GitHub Security Advisory.
+          required: true

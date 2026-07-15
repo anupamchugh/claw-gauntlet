@@ -1,0 +1,100 @@
+# Claw Gauntlet
+
+Claw Gauntlet is an early, local-first foundation for building evidence-backed
+agent capabilities. A **Claw** is a small, versioned capability with an explicit
+input, output, permission boundary, and failure contract. The gauntlet records
+what happened so a person or another agent can inspect the evidence instead of
+trusting a confident summary.
+
+> **Alpha status:** this repository is a foundation under active development.
+> The catalog describes the intended family, but catalog registration does not
+> mean a connector is available.
+
+## What works today
+
+- A semantically versioned catalog of immutable capability manifests.
+- Versioned, validated handoff envelopes and run records.
+- A local content-addressed evidence store with canonical JSON, SHA-256
+  references, integrity verification, and path-hardening tests.
+- Read-only CLI commands for inspecting the catalog and individual manifests.
+
+Every catalog entry currently reports `planned`. The foundation types above are
+implemented and tested; the source-specific Claws and end-to-end workflows are
+not yet implemented.
+
+## Quick start
+
+Claw Gauntlet requires Python 3.12 and
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/).
+
+```bash
+git clone https://github.com/anupamchugh/claw-gauntlet.git
+cd claw-gauntlet
+uv sync
+uv run pytest -q
+uv run clawgauntlet family --json
+uv run clawgauntlet manifest rrsclaw --json
+```
+
+The commands print deterministic JSON. They do not collect data, contact a
+publishing platform, or use credentials.
+
+## RSSClaw and RRSClaw
+
+The similar names have different jobs:
+
+- **RSSClaw** is the planned collection boundary for public RSS, Atom, JSON
+  Feed, newsletter, and YouTube-upload transports. It will normalize their
+  metadata into a common entry format.
+- **RRSClaw** means Reliability, Resilience, and Safety Claw. It is the planned
+  evaluator for run completion, reproducibility, provenance, recovery,
+  permissions, corrections, cost, and latency.
+
+A newsletter is a transport, not a separate knowledge type. The planned order
+is advertised RSS/Atom first, publisher feeds next, an approved mailbox for
+email-only sources, and a public archive as a final fallback. Planned YouTube
+support uses public channel upload feeds for discovery. Neither newsletter nor
+YouTube collection is implemented yet.
+
+## Architecture
+
+```text
+public source
+    -> bounded collector (planned)
+    -> normalized entry and evidence reference (planned)
+    -> content-addressed EvidenceStore (working)
+    -> RunRecord and handoff (working)
+    -> RRS evaluation (planned)
+    -> human-approved delivery (planned)
+```
+
+The important boundary is between untrusted source material and authority.
+Collectors should not hold publishing credentials. Evidence is passed by
+immutable reference, permissions stay least-privileged, and external actions
+require explicit human approval.
+
+## Planned source packs
+
+The design includes curated, public-only packs for engineering blogs, AI labs,
+builder essays, feeds and newsletters, and public video-upload metadata. A
+source pack is a reviewed set of canonical seeds and discovery rules—not a copy
+of third-party articles and not proof that a connector ships today.
+
+The roadmap also covers GitHub stars and repositories, Hacker News research,
+papers, digests, documentation, releases, approved social bundles, and
+provider-neutral visual assets. These remain planned until their manifest
+status and capability documentation say otherwise.
+
+## Project documents
+
+- [V1/V2 design and safety model](docs/superpowers/specs/2026-07-16-claw-family-v1-v2-design.md)
+- [Incremental foundation plan](docs/superpowers/plans/2026-07-16-claw-foundation-v1.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Support and sponsorship](SUPPORT.md)
+
+## License
+
+[MIT](LICENSE). Source content collected by future adapters will retain its own
+copyright and license; this project license does not grant rights to republish
+third-party material.
