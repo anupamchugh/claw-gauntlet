@@ -14,6 +14,8 @@ The system must remain useful from a terminal, an agent harness, or an MCP clien
 
 The first two versions cover the complete public Claw family. They do not promise autonomous social behavior.
 
+`MediaClaw` is not a name for this project or a future product. It already identifies China Unicom AI's OpenClaw-based multimodal generation platform and its May 2026 technical report (`https://github.com/UnicomAI/MediaClaw`, `https://arxiv.org/abs/2605.14771`). Claw Gauntlet instead focuses on evidence, public-source intelligence, quality evaluation, and safe handoffs. RSSClaw remains the blog and newsletter ingestion capability; any future end-user reader or reveal product requires a distinct, availability-checked name.
+
 - Claws collect, transform, evaluate, document, or publish.
 - Beads records durable work, dependencies, decisions, and ownership.
 - Agent Mail carries messages and handoff notifications between active agents.
