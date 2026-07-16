@@ -1,5 +1,6 @@
 import json
 from hashlib import sha256
+from pathlib import Path
 
 import claw_gauntlet.cli as cli_module
 from claw_gauntlet.cli import main
@@ -13,6 +14,14 @@ def _invoke(arguments, capsys):
     lines = captured.out.splitlines()
     assert len(lines) == 1
     return json.loads(lines[0])
+
+
+def test_sponsor_inbox_uses_installed_state_directory_by_default():
+    arguments = cli_module._parser().parse_args(["sponsor", "inbox"])
+
+    assert arguments.state_dir == (
+        Path.home() / "Library" / "Application Support" / "ClawGauntlet" / "state"
+    )
 
 
 def test_local_foundation_workflow_persists_evidence_runs_and_handoffs(

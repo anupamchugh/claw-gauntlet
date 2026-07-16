@@ -55,6 +55,10 @@ def _add_state_dir(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state-dir", type=Path, required=True)
 
 
+def _default_sponsor_state_dir() -> Path:
+    return Path.home() / "Library" / "Application Support" / "ClawGauntlet" / "state"
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="clawgauntlet")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -117,7 +121,11 @@ def _parser() -> argparse.ArgumentParser:
     sponsor_ingest.add_argument("--task-dir", type=Path)
     sponsor_ingest.add_argument("--notify", action="store_true")
     sponsor_inbox = sponsor_commands.add_parser("inbox")
-    _add_state_dir(sponsor_inbox)
+    sponsor_inbox.add_argument(
+        "--state-dir",
+        type=Path,
+        default=_default_sponsor_state_dir(),
+    )
     sponsor_schedule = sponsor_commands.add_parser("schedule")
     schedule_commands = sponsor_schedule.add_subparsers(
         dest="schedule_command",
