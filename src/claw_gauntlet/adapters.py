@@ -12,6 +12,7 @@ from claw_gauntlet.handoff import HandoffEnvelope
 
 if TYPE_CHECKING:
     from claw_gauntlet.improvement import ImprovementProposal
+    from claw_gauntlet.sponsorship import SponsorReview
 
 
 _SENSITIVE_CONTENT = re.compile(
@@ -83,6 +84,78 @@ class BeadsTaskLedger:
             raise TaskLedgerError(
                 f"Beads rejected improvement proposal (exit {result.returncode}); "
                 "stderr redacted"
+            )
+
+
+class SponsorTaskLedger:
+    def __init__(
+        self,
+        working_directory: str | Path,
+        *,
+        runner: Callable[..., Any] = subprocess.run,
+    ) -> None:
+        self.working_directory = Path(working_directory)
+        self._runner = runner
+
+    def create_review(self, review: "SponsorReview") -> None:
+        from claw_gauntlet.sponsorship import SponsorReview
+
+        if not isinstance(review, SponsorReview):
+            raise TypeError("review must be a SponsorReview")
+        metadata = json.dumps(
+            {
+                "draft_id": review.draft_id,
+                "draft_ref": review.draft_ref,
+                "lane": review.lane,
+                "public_url": review.public_url,
+            },
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        command = [
+            "bd",
+            "create",
+            f"Review sponsor draft: {review.prospect_name}",
+            "--type",
+            "task",
+            "--priority",
+            "1",
+            "--description",
+            (
+                f"Review the evidence-backed {review.lane} draft for "
+                f"{review.public_url}. Approve, edit, decline, or mark no-contact."
+            ),
+            "--acceptance",
+            (
+                "The owner records an explicit decision. No external message is sent "
+                "by this task or by SponsorClaw."
+            ),
+            "--external-ref",
+            f"sponsor-draft:{review.draft_id}",
+            "--labels",
+            "approval-required,sponsorship",
+            "--metadata",
+            metadata,
+            "--silent",
+        ]
+        self._run(command, "create sponsor review")
+        tracker = self.working_directory / ".beads" / "issues.jsonl"
+        if tracker.is_file():
+            self._run(["bd", "export", "-o", str(tracker)], "export sponsor review")
+
+    def _run(self, command: list[str], action: str) -> None:
+        result = self._runner(
+            command,
+            cwd=self.working_directory,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise TaskLedgerError(
+                f"Beads failed to {action} (exit {result.returncode}); stderr redacted"
             )
 
 

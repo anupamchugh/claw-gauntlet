@@ -7,10 +7,12 @@ import pytest
 from claw_gauntlet.adapters import (
     BeadsTaskLedger,
     JsonlMailTransport,
+    SponsorTaskLedger,
     TaskLedgerError,
 )
 from claw_gauntlet.handoff import HandoffEnvelope, artifact_refs_checksum
 from claw_gauntlet.improvement import ImprovementProposal
+from claw_gauntlet.sponsorship import SponsorReview
 
 
 ARTIFACT_REF = "evidence://sha256/c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c"
@@ -101,3 +103,58 @@ def test_jsonl_mail_rejects_token_like_content_without_writing(tmp_path):
         JsonlMailTransport(outbox).send(_handoff("api_key=must-not-be-mailed"))
 
     assert not outbox.exists()
+
+
+def test_sponsor_task_adapter_creates_reference_only_approval_task(tmp_path):
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="claw-123\n", stderr="")
+
+    review = SponsorReview(
+        draft_id="b" * 64,
+        draft_ref=ARTIFACT_REF,
+        prospect_name="Example Developer Tools",
+        public_url="https://github.com/example",
+        lane="company-pilot",
+        confidence=82,
+    )
+    SponsorTaskLedger(tmp_path, runner=runner).create_review(review)
+
+    command, kwargs = calls[0]
+    assert command[:3] == ["bd", "create", "Review sponsor draft: Example Developer Tools"]
+    assert command[command.index("--external-ref") + 1] == f"sponsor-draft:{review.draft_id}"
+    assert command[command.index("--labels") + 1] == "approval-required,sponsorship"
+    metadata = json.loads(command[command.index("--metadata") + 1])
+    assert metadata == {
+        "draft_id": review.draft_id,
+        "draft_ref": ARTIFACT_REF,
+        "lane": "company-pilot",
+        "public_url": "https://github.com/example",
+    }
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs.get("shell") is not True
+
+
+def test_sponsor_task_adapter_exports_only_when_tracker_exists(tmp_path):
+    tracker = tmp_path / ".beads" / "issues.jsonl"
+    tracker.parent.mkdir()
+    tracker.write_text("", encoding="utf-8")
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="claw-123\n", stderr="")
+
+    review = SponsorReview(
+        draft_id="b" * 64,
+        draft_ref=ARTIFACT_REF,
+        prospect_name="Example",
+        public_url="https://github.com/example",
+        lane="feedback",
+        confidence=70,
+    )
+    SponsorTaskLedger(tmp_path, runner=runner).create_review(review)
+
+    assert calls[1] == ["bd", "export", "-o", str(tracker)]

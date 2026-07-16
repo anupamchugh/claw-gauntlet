@@ -22,6 +22,8 @@ trusting a confident summary.
   cited ProjectClaw screening of public repository evidence.
 - Immutable BlogClaw and TwitterClaw draft bundles with reference-only,
   approval-required Publisher requests.
+- Read-only SponsorClaw research with strict reports, deduplicated draft
+  evidence, optional Beads review tasks, and a local approval inbox.
 - JSON CLI commands for inspecting the catalog and exercising the local
   evidence-to-improvement workflow.
 
@@ -104,6 +106,8 @@ status and capability documentation say otherwise.
 - [Working capability index](docs/capabilities.md)
 - [GitHub public collection and project screening](docs/github.md)
 - [BlogClaw and TwitterClaw publishing workflow](docs/publishing.md)
+- [SponsorClaw funding and autonomous review loop](docs/sponsorship.md)
+- [Curated agentic startup operating stack](docs/startup-operating-stack.md)
 - [Reviewed Gas Town execution](docs/gastown.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

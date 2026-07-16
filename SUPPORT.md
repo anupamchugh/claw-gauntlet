@@ -13,4 +13,4 @@ GitHub sponsorship metadata is included for people who want to support the
 work. Small sponsorships can help cover public test fixtures, CI, documentation,
 source-health checks, and maintenance time. Sponsorship does not buy roadmap
 control, priority support, access to private data, endorsements, or guaranteed
-delivery. No paid tiers or financial benefits are promised by this repository.
+delivery. See the [sponsorship model and proposed tiers](docs/sponsorship.md).

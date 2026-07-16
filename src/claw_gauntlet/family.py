@@ -33,6 +33,13 @@ _MANIFESTS = (
     _manifest("HNClaw", "discovery", ("hn.research",)),
     _manifest("RSSClaw", "discovery", ("feed.collect",)),
     _manifest("ProjectClaw", "intelligence", ("evidence.evaluate",), status="experimental"),
+    _manifest(
+        "SponsorClaw",
+        "intelligence",
+        ("sponsor.research", "sponsor.draft"),
+        ("public:evidence:read", "evidence:write", "handoff:send"),
+        status="experimental",
+    ),
     _manifest("TrustClaw", "intelligence", ("provenance.verify",)),
     _manifest(
         "RRSClaw",

@@ -10,7 +10,7 @@ def test_family_json_lists_the_complete_planned_catalog(capsys):
     payload = json.loads(capsys.readouterr().out)
     by_name = {item["name"]: item for item in payload["claws"]}
 
-    assert len(payload["claws"]) == 28
+    assert len(payload["claws"]) == 29
     assert set(by_name) == {
         "StarClaw",
         "GHClaw",
@@ -40,6 +40,7 @@ def test_family_json_lists_the_complete_planned_catalog(capsys):
         "CredentialArbiter",
         "Scheduler",
         "Dashboard",
+        "SponsorClaw",
     }
     assert {item["status"] for item in payload["claws"]} == {
         "experimental",
@@ -49,6 +50,7 @@ def test_family_json_lists_the_complete_planned_catalog(capsys):
     assert by_name["Dashboard"]["kind"] == "interface"
     assert by_name["ReleaseClaw"]["kind"] == "delivery"
     assert by_name["EvidenceStore"]["kind"] == "infrastructure"
+    assert by_name["SponsorClaw"]["kind"] == "intelligence"
 
 
 def test_manifest_json_is_case_insensitive_and_sorted(capsys):
