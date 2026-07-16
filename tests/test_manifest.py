@@ -126,7 +126,14 @@ def test_family_contains_each_component_once_and_reports_real_status():
     manifests = family_manifests()
     names = [item.name for item in manifests]
     assert len(names) == len(set(names))
-    assert {"RRSClaw", "DocsClaw", "BlogClaw", "TwitterClaw", "ForkClaw"} <= set(names)
+    assert {
+        "RRSClaw",
+        "DocsClaw",
+        "BlogClaw",
+        "TwitterClaw",
+        "ForkClaw",
+        "SponsorClaw",
+    } <= set(names)
     assert {item.status for item in manifests} == {"planned", "experimental"}
     assert {
         "StarClaw",
@@ -138,11 +145,16 @@ def test_family_contains_each_component_once_and_reports_real_status():
         "EvidenceStore",
         "TaskLedgerAdapter",
         "AgentMailTransport",
+        "SponsorClaw",
     } == {item.name for item in manifests if item.status == "experimental"}
     assert {item.version for item in manifests} == {"0.1.0"}
     assert {item.protocol_version for item in manifests} == {"1.0.0"}
     assert manifest_for("RRSClaw").capabilities == ("run.score", "run.regression")
     assert manifest_for("rrsclaw") == manifest_for("RRSClaw")
+    assert manifest_for("sponsorclaw").capabilities == (
+        "sponsor.research",
+        "sponsor.draft",
+    )
 
 
 def test_family_component_kinds_match_the_complete_catalog():
@@ -175,6 +187,7 @@ def test_family_component_kinds_match_the_complete_catalog():
         "CredentialArbiter": "infrastructure",
         "Scheduler": "infrastructure",
         "Dashboard": "interface",
+        "SponsorClaw": "intelligence",
     }
 
 

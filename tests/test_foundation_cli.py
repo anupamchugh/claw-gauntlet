@@ -3,6 +3,7 @@ from hashlib import sha256
 
 import claw_gauntlet.cli as cli_module
 from claw_gauntlet.cli import main
+from claw_gauntlet.sponsorship import SponsorResearchReport
 
 
 def _invoke(arguments, capsys):
@@ -266,3 +267,111 @@ def test_publication_bundle_cli_creates_an_approval_gated_publisher_request(
     assert handoff["approval_required"] is True
     assert handoff["artifact_refs"] == [bundled["artifact_ref"]]
     assert "Evidence first" not in outbox.read_text()
+
+
+def _sponsor_campaign_file(tmp_path):
+    path = tmp_path / "campaign.json"
+    path.write_text(
+        json.dumps(
+            {
+                "project_name": "Claw Gauntlet",
+                "repository_url": "https://github.com/anupamchugh/claw-gauntlet",
+                "description": "Evidence-backed capability intelligence.",
+                "community_ask": "Support fixtures, CI, and documentation.",
+                "company_pilot": "A bounded two-week evidence workflow pilot.",
+                "price_range": "$500-$1,500",
+                "learning_repositories": ["obra/superpowers"],
+                "target_categories": ["AI developer tools"],
+                "max_drafts": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _sponsor_report_payload():
+    return {
+        "summary": "One public feedback prospect.",
+        "prospects": [
+            {
+                "name": "Example",
+                "public_url": "https://github.com/example",
+                "lane": "feedback",
+                "fit_reason": "The public repository documents agent workflows.",
+                "evidence_urls": ["https://github.com/example/tool"],
+                "subject": "Claw Gauntlet feedback request",
+                "body": "Would you review one bounded public workflow?",
+                "confidence": 75,
+            }
+        ],
+    }
+
+
+def test_sponsor_ingest_and_inbox_cli_are_approval_only(tmp_path, capsys):
+    state_dir = tmp_path / "state"
+    campaign = _sponsor_campaign_file(tmp_path)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(_sponsor_report_payload()), encoding="utf-8")
+
+    ingested = _invoke(
+        [
+            "sponsor",
+            "ingest",
+            "--state-dir",
+            str(state_dir),
+            "--config",
+            str(campaign),
+            "--input",
+            str(report),
+        ],
+        capsys,
+    )
+    inbox = _invoke(
+        ["sponsor", "inbox", "--state-dir", str(state_dir)],
+        capsys,
+    )
+
+    assert ingested["status"] == "awaiting-review"
+    assert len(ingested["reviews"]) == 1
+    assert inbox["status"] == "found"
+    assert inbox["count"] == 1
+    assert inbox["items"][0]["requested_action"] == "review-sponsor-outreach"
+    assert "body" not in inbox["items"][0]
+
+
+def test_sponsor_research_cli_runs_researcher_then_ingests(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    campaign = _sponsor_campaign_file(tmp_path)
+    state_dir = tmp_path / "state"
+
+    class FakeResearcher:
+        def __init__(self, state_root, *, working_directory):
+            assert state_root == state_dir
+            assert working_directory == tmp_path
+
+        def research(self, parsed_campaign):
+            assert parsed_campaign.project_name == "Claw Gauntlet"
+            return SponsorResearchReport.from_dict(_sponsor_report_payload())
+
+    monkeypatch.setattr(cli_module, "CodexSponsorResearcher", FakeResearcher)
+
+    result = _invoke(
+        [
+            "sponsor",
+            "research",
+            "--state-dir",
+            str(state_dir),
+            "--config",
+            str(campaign),
+            "--workspace",
+            str(tmp_path),
+        ],
+        capsys,
+    )
+
+    assert result["status"] == "awaiting-review"
+    assert result["research_summary"] == "One public feedback prospect."

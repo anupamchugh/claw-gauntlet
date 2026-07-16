@@ -241,6 +241,16 @@ class SponsorReview:
         if type(self.confidence) is not int or not 0 <= self.confidence <= 100:
             raise ValueError("confidence must be an integer from 0 to 100")
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "draft_id": self.draft_id,
+            "draft_ref": self.draft_ref,
+            "prospect_name": self.prospect_name,
+            "public_url": self.public_url,
+            "lane": self.lane,
+            "confidence": self.confidence,
+        }
+
 
 class SponsorTaskPort(Protocol):
     def create_review(self, review: SponsorReview) -> Any: ...

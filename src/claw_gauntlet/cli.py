@@ -7,16 +7,27 @@ import sys
 from time import monotonic_ns
 from typing import Any
 
-from claw_gauntlet.adapters import JsonlMailTransport
+from claw_gauntlet.adapters import (
+    JsonlMailTransport,
+    SponsorTaskLedger,
+    TaskLedgerError,
+)
 from claw_gauntlet.evidence import EvidenceRef, EvidenceStore
 from claw_gauntlet.family import family_payload, manifest_for
 from claw_gauntlet.github_claws import GitHubAPIError, GitHubPublicCollector
+from claw_gauntlet.handoff import HandoffEnvelope
 from claw_gauntlet.improvement import ImprovementCoordinator, ImprovementProposal
 from claw_gauntlet.project_claw import evaluate_repository
 from claw_gauntlet.publication import PublicationBundle, publisher_request
+from claw_gauntlet.research_agent import CodexSponsorResearcher, ResearchAgentError
 from claw_gauntlet.rrs import score_run
 from claw_gauntlet.run_ledger import RunLedger, RunScore
 from claw_gauntlet.run_record import RunRecord
+from claw_gauntlet.sponsorship import (
+    SponsorCampaign,
+    SponsorCycle,
+    SponsorResearchReport,
+)
 
 
 class _FoundationCommandError(RuntimeError):
@@ -83,6 +94,21 @@ def _parser() -> argparse.ArgumentParser:
     _add_state_dir(github_stars)
     github_stars.add_argument("username")
     github_stars.add_argument("--max-pages", type=int, default=1)
+
+    sponsor = subparsers.add_parser("sponsor")
+    sponsor_commands = sponsor.add_subparsers(dest="sponsor_command", required=True)
+    sponsor_research = sponsor_commands.add_parser("research")
+    _add_state_dir(sponsor_research)
+    sponsor_research.add_argument("--config", type=Path, required=True)
+    sponsor_research.add_argument("--workspace", type=Path, required=True)
+    sponsor_research.add_argument("--task-dir", type=Path)
+    sponsor_ingest = sponsor_commands.add_parser("ingest")
+    _add_state_dir(sponsor_ingest)
+    sponsor_ingest.add_argument("--config", type=Path, required=True)
+    sponsor_ingest.add_argument("--input", type=Path, required=True)
+    sponsor_ingest.add_argument("--task-dir", type=Path)
+    sponsor_inbox = sponsor_commands.add_parser("inbox")
+    _add_state_dir(sponsor_inbox)
 
     project = subparsers.add_parser("project")
     project_commands = project.add_subparsers(dest="project_command", required=True)
@@ -197,6 +223,30 @@ def _evidence_ref(uri: str) -> EvidenceRef:
 
 def _foundation_command(args: argparse.Namespace) -> dict[str, Any]:
     state_root = _state_root(args.state_dir)
+    if args.command == "sponsor" and args.sponsor_command == "inbox":
+        return _sponsor_inbox(state_root)
+    if args.command == "sponsor":
+        campaign = SponsorCampaign.from_dict(_read_json_object(args.config))
+        if args.sponsor_command == "research":
+            report = CodexSponsorResearcher(
+                state_root,
+                working_directory=args.workspace,
+            ).research(campaign)
+        else:
+            report = SponsorResearchReport.from_dict(_read_json_object(args.input))
+        task_ledger = (
+            SponsorTaskLedger(args.task_dir) if args.task_dir is not None else None
+        )
+        result = SponsorCycle(state_root, task_ledger=task_ledger).ingest(
+            campaign,
+            report,
+        )
+        return {
+            "report_ref": result.report_ref,
+            "research_summary": report.summary,
+            "reviews": [review.to_dict() for review in result.new_reviews],
+            "status": result.status,
+        }
     if args.command == "evidence" and args.evidence_command == "put":
         reference = EvidenceStore(state_root / "evidence").put_json(
             _read_json_object(args.input)
@@ -358,6 +408,31 @@ def _foundation_command(args: argparse.Namespace) -> dict[str, Any]:
     raise _FoundationCommandError("unsupported foundation command")
 
 
+def _sponsor_inbox(state_root: Path) -> dict[str, Any]:
+    outbox = state_root / "mail" / "sponsor-approvals.jsonl"
+    if not outbox.exists():
+        return {"count": 0, "items": [], "status": "empty"}
+    items = []
+    for line in outbox.read_text(encoding="utf-8").splitlines():
+        handoff = HandoffEnvelope.from_dict(json.loads(line))
+        if handoff.source != "SponsorClaw":
+            raise ValueError("sponsor inbox contains a non-SponsorClaw handoff")
+        items.append(
+            {
+                "artifact_refs": list(handoff.artifact_refs),
+                "created_at": handoff.created_at,
+                "handoff_id": handoff.handoff_id,
+                "requested_action": handoff.requested_action,
+                "summary": handoff.summary,
+            }
+        )
+    return {
+        "count": len(items),
+        "items": items,
+        "status": "found" if items else "empty",
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -380,6 +455,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         ValueError,
         KeyError,
         TypeError,
+        ResearchAgentError,
+        TaskLedgerError,
         _FoundationCommandError,
     ) as error:
         print(
