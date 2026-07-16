@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from claw_gauntlet.research_agent import CodexSponsorResearcher, ResearchAgentError
+from claw_gauntlet.research_agent import (
+    CodexSponsorResearcher,
+    ResearchAgentError,
+    _report_schema,
+)
 from claw_gauntlet.sponsorship import SponsorCampaign
 
 
@@ -113,3 +117,16 @@ def test_researcher_rejects_malformed_output_and_cleans_temporary_files(tmp_path
         ).research(_campaign())
 
     assert list((state_root / "research-tmp").iterdir()) == []
+
+
+def test_output_schema_uses_only_supported_structured_output_keywords():
+    def walk(value):
+        if isinstance(value, dict):
+            assert "format" not in value
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(_report_schema())

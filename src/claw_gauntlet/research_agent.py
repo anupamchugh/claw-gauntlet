@@ -18,7 +18,7 @@ def _report_schema() -> dict[str, Any]:
         "additionalProperties": False,
         "properties": {
             "name": {"type": "string", "minLength": 1, "maxLength": 100},
-            "public_url": {"type": "string", "format": "uri", "maxLength": 2048},
+            "public_url": {"type": "string", "maxLength": 2048},
             "lane": {
                 "type": "string",
                 "enum": ["community-sponsor", "company-pilot", "feedback"],
@@ -28,7 +28,7 @@ def _report_schema() -> dict[str, Any]:
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 5,
-                "items": {"type": "string", "format": "uri", "maxLength": 2048},
+                "items": {"type": "string", "maxLength": 2048},
             },
             "subject": {"type": "string", "minLength": 1, "maxLength": 160},
             "body": {"type": "string", "minLength": 1, "maxLength": 2000},
