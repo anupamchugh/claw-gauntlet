@@ -62,9 +62,9 @@ def test_researcher_runs_codex_ephemerally_in_read_only_mode(tmp_path):
     report = researcher.research(_campaign())
 
     command, kwargs = calls[0]
-    assert command[:2] == ["/opt/codex", "exec"]
+    assert command[:3] == ["/opt/codex", "--search", "exec"]
     assert "--ephemeral" in command
-    assert "--search" in command
+    assert command.count("--search") == 1
     assert "--ignore-user-config" in command
     assert command[command.index("--sandbox") + 1] == "read-only"
     assert command[command.index("--cd") + 1] == str(tmp_path)

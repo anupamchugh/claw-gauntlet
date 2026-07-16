@@ -126,9 +126,9 @@ class CodexSponsorResearcher:
         schema_path.chmod(0o600)
         command = [
             self.executable,
+            "--search",
             "exec",
             "--ephemeral",
-            "--search",
             "--ignore-user-config",
             "--sandbox",
             "read-only",
