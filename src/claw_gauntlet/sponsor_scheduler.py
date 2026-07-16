@@ -4,12 +4,21 @@ import os
 from pathlib import Path
 import plistlib
 import secrets
+import shutil
 import subprocess
 import sys
 from typing import Any
 
 
 _LABEL = "io.github.anupamchugh.claw-gauntlet.sponsor-agent"
+_SYSTEM_PATHS = (
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+)
 
 
 class LaunchAgentError(RuntimeError):
@@ -23,6 +32,23 @@ def _absolute(path: str | Path, field: str) -> Path:
     return value
 
 
+def managed_search_path(
+    executable: str | Path,
+    *,
+    which: Callable[[str], str | None] = shutil.which,
+) -> str:
+    executable = _absolute(executable, "executable")
+    directories = [str(executable.parent)]
+    for command in ("codex", "bd", "git"):
+        resolved = which(command)
+        if resolved is not None:
+            # Keep the stable directory returned by PATH lookup. Resolving a
+            # Homebrew shim would bake its versioned Cellar path into launchd.
+            directories.append(str(Path(resolved).parent))
+    directories.extend(_SYSTEM_PATHS)
+    return ":".join(dict.fromkeys(directories))
+
+
 @dataclass(frozen=True)
 class SponsorSchedule:
     executable: Path
@@ -32,6 +58,7 @@ class SponsorSchedule:
     task_dir: Path
     weekday: int = 1
     hour: int = 10
+    environment_path: str = ":".join(_SYSTEM_PATHS)
 
     def __post_init__(self) -> None:
         for field in (
@@ -46,6 +73,13 @@ class SponsorSchedule:
             raise ValueError("weekday must be an integer from 1 to 7")
         if type(self.hour) is not int or not 0 <= self.hour <= 23:
             raise ValueError("hour must be an integer from 0 to 23")
+        if (
+            type(self.environment_path) is not str
+            or not self.environment_path
+            or "\n" in self.environment_path
+            or any(not Path(item).is_absolute() for item in self.environment_path.split(":"))
+        ):
+            raise ValueError("environment_path must contain absolute colon-separated paths")
 
     def to_plist(self) -> dict[str, Any]:
         logs = self.state_dir / "logs"
@@ -72,6 +106,7 @@ class SponsorSchedule:
                 "Minute": 0,
             },
             "ProcessType": "Background",
+            "EnvironmentVariables": {"PATH": self.environment_path},
             "StandardOutPath": str(logs / "sponsor-agent.log"),
             "StandardErrorPath": str(logs / "sponsor-agent.error.log"),
         }
@@ -110,6 +145,10 @@ class LaunchAgentManager:
         logs.chmod(0o700)
         path = self.plist_path
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if path.exists():
+            self._invoke(
+                ["/bin/launchctl", "bootout", f"gui/{self.uid}", str(path)]
+            )
         temporary = path.parent / f".{path.name}.{secrets.token_hex(8)}.tmp"
         descriptor = os.open(
             temporary,

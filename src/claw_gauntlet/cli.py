@@ -27,6 +27,7 @@ from claw_gauntlet.sponsor_scheduler import (
     LaunchAgentError,
     LaunchAgentManager,
     SponsorSchedule,
+    managed_search_path,
     notify_owner,
 )
 from claw_gauntlet.sponsorship import (
@@ -254,6 +255,7 @@ def _foundation_command(args: argparse.Namespace) -> dict[str, Any]:
                 campaign_config=args.config,
                 workspace=args.workspace,
                 task_dir=args.task_dir,
+                environment_path=managed_search_path(args.executable),
             )
             path = manager.install(schedule)
             return {"plist": str(path), "status": "installed"}
