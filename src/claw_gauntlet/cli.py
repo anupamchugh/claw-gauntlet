@@ -23,6 +23,12 @@ from claw_gauntlet.research_agent import CodexSponsorResearcher, ResearchAgentEr
 from claw_gauntlet.rrs import score_run
 from claw_gauntlet.run_ledger import RunLedger, RunScore
 from claw_gauntlet.run_record import RunRecord
+from claw_gauntlet.sponsor_scheduler import (
+    LaunchAgentError,
+    LaunchAgentManager,
+    SponsorSchedule,
+    notify_owner,
+)
 from claw_gauntlet.sponsorship import (
     SponsorCampaign,
     SponsorCycle,
@@ -102,13 +108,29 @@ def _parser() -> argparse.ArgumentParser:
     sponsor_research.add_argument("--config", type=Path, required=True)
     sponsor_research.add_argument("--workspace", type=Path, required=True)
     sponsor_research.add_argument("--task-dir", type=Path)
+    sponsor_research.add_argument("--notify", action="store_true")
     sponsor_ingest = sponsor_commands.add_parser("ingest")
     _add_state_dir(sponsor_ingest)
     sponsor_ingest.add_argument("--config", type=Path, required=True)
     sponsor_ingest.add_argument("--input", type=Path, required=True)
     sponsor_ingest.add_argument("--task-dir", type=Path)
+    sponsor_ingest.add_argument("--notify", action="store_true")
     sponsor_inbox = sponsor_commands.add_parser("inbox")
     _add_state_dir(sponsor_inbox)
+    sponsor_schedule = sponsor_commands.add_parser("schedule")
+    schedule_commands = sponsor_schedule.add_subparsers(
+        dest="schedule_command",
+        required=True,
+    )
+    schedule_install = schedule_commands.add_parser("install")
+    _add_state_dir(schedule_install)
+    schedule_install.add_argument("--config", type=Path, required=True)
+    schedule_install.add_argument("--workspace", type=Path, required=True)
+    schedule_install.add_argument("--task-dir", type=Path, required=True)
+    schedule_install.add_argument("--executable", type=Path, required=True)
+    for name in ("status", "uninstall"):
+        schedule_command = schedule_commands.add_parser(name)
+        _add_state_dir(schedule_command)
 
     project = subparsers.add_parser("project")
     project_commands = project.add_subparsers(dest="project_command", required=True)
@@ -223,6 +245,23 @@ def _evidence_ref(uri: str) -> EvidenceRef:
 
 def _foundation_command(args: argparse.Namespace) -> dict[str, Any]:
     state_root = _state_root(args.state_dir)
+    if args.command == "sponsor" and args.sponsor_command == "schedule":
+        manager = LaunchAgentManager()
+        if args.schedule_command == "install":
+            schedule = SponsorSchedule(
+                executable=args.executable,
+                state_dir=state_root,
+                campaign_config=args.config,
+                workspace=args.workspace,
+                task_dir=args.task_dir,
+            )
+            path = manager.install(schedule)
+            return {"plist": str(path), "status": "installed"}
+        if args.schedule_command == "status":
+            loaded = manager.status()
+            return {"loaded": loaded, "status": "running" if loaded else "stopped"}
+        manager.uninstall()
+        return {"status": "uninstalled"}
     if args.command == "sponsor" and args.sponsor_command == "inbox":
         return _sponsor_inbox(state_root)
     if args.command == "sponsor":
@@ -241,6 +280,8 @@ def _foundation_command(args: argparse.Namespace) -> dict[str, Any]:
             campaign,
             report,
         )
+        if args.notify and result.new_reviews:
+            notify_owner(len(result.new_reviews))
         return {
             "report_ref": result.report_ref,
             "research_summary": report.summary,
@@ -457,6 +498,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         TypeError,
         ResearchAgentError,
         TaskLedgerError,
+        LaunchAgentError,
         _FoundationCommandError,
     ) as error:
         print(

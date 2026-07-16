@@ -1,0 +1,39 @@
+{
+  "project_name": "Claw Gauntlet",
+  "repository_url": "https://github.com/anupamchugh/claw-gauntlet",
+  "description": "A local-first, evidence-backed capability and handoff layer for agentic projects.",
+  "community_ask": "Support public fixtures, CI, connector health checks, documentation, and maintenance.",
+  "company_pilot": "A bounded two-week setup or audit for one approved repository and one evidence workflow, with documented permissions and a handoff report.",
+  "price_range": "$500-$1,500",
+  "learning_repositories": [
+    "openai/codex",
+    "anthropics/claude-code",
+    "obra/superpowers",
+    "Aider-AI/aider",
+    "OpenHands/OpenHands",
+    "cline/cline",
+    "gastownhall/gastown",
+    "gastownhall/beads",
+    "Dicklesworthstone/cass_memory_system",
+    "Dicklesworthstone/mcp_agent_mail",
+    "langchain-ai/langgraph",
+    "microsoft/autogen",
+    "triggerdotdev/trigger.dev",
+    "twentyhq/twenty",
+    "PostHog/posthog",
+    "dubinc/dub",
+    "formbricks/formbricks",
+    "pointfreeco/swift-composable-architecture",
+    "tuist/tuist",
+    "fastlane/fastlane"
+  ],
+  "target_categories": [
+    "AI developer tools",
+    "agent coordination platforms",
+    "developer infrastructure companies",
+    "open-source programs",
+    "product analytics and customer workflow tools",
+    "Apple developer tooling"
+  ],
+  "max_drafts": 3
+}

@@ -375,3 +375,89 @@ def test_sponsor_research_cli_runs_researcher_then_ingests(
 
     assert result["status"] == "awaiting-review"
     assert result["research_summary"] == "One public feedback prospect."
+
+
+def test_sponsor_ingest_notifies_only_when_new_reviews_exist(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    state_dir = tmp_path / "state"
+    campaign = _sponsor_campaign_file(tmp_path)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(_sponsor_report_payload()), encoding="utf-8")
+    notifications = []
+    monkeypatch.setattr(cli_module, "notify_owner", notifications.append)
+    command = [
+        "sponsor",
+        "ingest",
+        "--state-dir",
+        str(state_dir),
+        "--config",
+        str(campaign),
+        "--input",
+        str(report),
+        "--notify",
+    ]
+
+    _invoke(command, capsys)
+    _invoke(command, capsys)
+
+    assert notifications == [1]
+
+
+def test_sponsor_schedule_cli_installs_and_reports_status(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    calls = []
+
+    class FakeManager:
+        def install(self, schedule):
+            calls.append(schedule)
+            return tmp_path / "SponsorAgent.plist"
+
+        def status(self):
+            return True
+
+        def uninstall(self):
+            calls.append("uninstalled")
+
+    monkeypatch.setattr(cli_module, "LaunchAgentManager", FakeManager)
+    campaign = _sponsor_campaign_file(tmp_path)
+    common = [
+        "--state-dir",
+        str(tmp_path / "state"),
+    ]
+    installed = _invoke(
+        [
+            "sponsor",
+            "schedule",
+            "install",
+            *common,
+            "--config",
+            str(campaign),
+            "--workspace",
+            str(tmp_path),
+            "--task-dir",
+            str(tmp_path),
+            "--executable",
+            str(tmp_path / "clawgauntlet"),
+        ],
+        capsys,
+    )
+    status = _invoke(
+        ["sponsor", "schedule", "status", *common],
+        capsys,
+    )
+    removed = _invoke(
+        ["sponsor", "schedule", "uninstall", *common],
+        capsys,
+    )
+
+    assert installed["status"] == "installed"
+    assert installed["plist"] == str(tmp_path / "SponsorAgent.plist")
+    assert calls[0].campaign_config == campaign
+    assert status == {"loaded": True, "status": "running"}
+    assert removed["status"] == "uninstalled"
